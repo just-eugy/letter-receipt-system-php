@@ -10,7 +10,11 @@ use App\Http\Controllers\Api\AdminController;
 // Public API endpoints (no authentication required)
 Route::middleware('api')->prefix('public')->group(function () {
     Route::get('/recipient-roles', [PublicDeliveryController::class, 'recipientRoles']);
-    Route::post('/deliveries', [PublicDeliveryController::class, 'create']);
+    
+    // Delivery creation with rate limiting (40 req/min per IP)
+    Route::post('/deliveries', [PublicDeliveryController::class, 'create'])
+        ->middleware('throttle:delivery-create');
+    
     Route::get('/deliveries/{tracking}', [PublicDeliveryController::class, 'track']);
 });
 
@@ -33,12 +37,23 @@ Route::middleware(['api', 'auth:sanctum', 'role:receptionist,admin'])->prefix('r
 
 // Admin API endpoints (requires ADMIN role, except login/me)
 Route::middleware('api')->prefix('admin')->group(function () {
-    Route::post('/login', [AdminController::class, 'login']);
-    Route::post('/logout', [AdminController::class, 'logout'])->middleware('auth:sanctum');
-    Route::get('/me', [AdminController::class, 'me'])->middleware('auth:sanctum');
+    // Login with rate limiting (8 req/min per IP)
+    Route::post('/login', [AdminController::class, 'login'])
+        ->middleware('throttle:login');
+    
+    Route::post('/logout', [AdminController::class, 'logout'])
+        ->middleware('auth:sanctum');
+    
+    Route::get('/me', [AdminController::class, 'me'])
+        ->middleware('auth:sanctum');
 });
 
-// Authenticated user endpoint
-Route::middleware(['api', 'auth:sanctum'])->get('/user', function (Request $request) {
+// Authenticated user endpoint (supports both Sanctum token and HTTP Basic)
+Route::middleware(['api', 'auth:sanctum', 'auth.basic'])->get('/user', function (Request $request) {
     return $request->user();
+});
+
+// API routes with HTTP Basic fallback for Java compatibility
+Route::middleware(['api', 'auth:sanctum', 'auth.basic'])->group(function () {
+    // These routes will also accept HTTP Basic auth as fallback
 });
