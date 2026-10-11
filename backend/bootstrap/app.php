@@ -9,7 +9,6 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Auth\AuthenticationException;
-use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -26,17 +25,6 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Global middleware
         $middleware->prepend(\App\Http\Middleware\SecurityHeaders::class);
-
-        // CORS for API routes
-        $middleware->api(prepend: [
-            EnsureFrontendRequestsAreStateful::class,
-        ]);
-
-        // Rate limiting
-        $middleware->rateLimiting([
-            'login' => \Illuminate\Routing\Middleware\ThrottleRequests::class.':login',
-            'delivery-create' => \Illuminate\Routing\Middleware\ThrottleRequests::class.':delivery-create',
-        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

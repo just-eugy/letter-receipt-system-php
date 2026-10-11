@@ -37,15 +37,15 @@ Route::middleware(['api', 'auth:sanctum', 'role:receptionist,admin'])->prefix('r
 
 // Admin API endpoints (requires ADMIN role, except login/me)
 Route::middleware('api')->prefix('admin')->group(function () {
-    // Login with rate limiting (8 req/min per IP)
+    // Login with rate limiting (8 req/min per IP) - no auth required
     Route::post('/login', [AdminController::class, 'login'])
         ->middleware('throttle:login');
     
-    Route::post('/logout', [AdminController::class, 'logout'])
-        ->middleware('auth:sanctum');
-    
-    Route::get('/me', [AdminController::class, 'me'])
-        ->middleware('auth:sanctum');
+    // Admin-only endpoints
+    Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
+        Route::post('/logout', [AdminController::class, 'logout']);
+        Route::get('/me', [AdminController::class, 'me']);
+    });
 });
 
 // Authenticated user endpoint (supports both Sanctum token and HTTP Basic)

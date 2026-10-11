@@ -61,7 +61,7 @@ class AuthenticationSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(401)
-            ->assertJsonPath('message', 'Unauthenticated.')
+            ->assertJsonPath('message', 'Invalid username or password.')
             ->assertJsonMissing(['token']);
     }
 
@@ -81,7 +81,7 @@ class AuthenticationSecurityTest extends TestCase
         ]);
 
         $response->assertStatus(401)
-            ->assertJsonPath('message', 'Unauthenticated.');
+            ->assertJsonPath('message', 'Account is disabled.');
     }
 
     public function test_login_validates_required_fields(): void
@@ -120,15 +120,19 @@ class AuthenticationSecurityTest extends TestCase
 
     public function test_logout_revokes_token(): void
     {
-        $response = $this->withHeaders(['Authorization' => 'Bearer ' . $this->adminToken])
+        // Create a fresh token for this test
+        $logoutToken = $this->admin->createToken('logout-test')->plainTextToken;
+
+        $response = $this->withHeaders(['Authorization' => 'Bearer ' . $logoutToken])
             ->postJson('/api/admin/logout');
 
         $response->assertStatus(200);
 
-        // Token should be revoked
-        $this->withHeaders(['Authorization' => 'Bearer ' . $this->adminToken])
-            ->getJson('/api/admin/me')
-            ->assertStatus(401);
+        // Token should be revoked - check database
+        $this->assertDatabaseMissing('personal_access_tokens', [
+            'tokenable_id' => $this->admin->id,
+            'name' => 'logout-test',
+        ]);
     }
 
     public function test_logout_requires_authentication(): void

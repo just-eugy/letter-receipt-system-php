@@ -7,6 +7,7 @@ use App\Http\Requests\LoginRequest;
 use App\Services\AdminService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
 class AdminController extends Controller
@@ -31,10 +32,18 @@ class AdminController extends Controller
                 'displayName' => $result['user']['displayName'],
                 'role' => $result['user']['role'],
             ]);
-        } catch (\Illuminate\Validation\ValidationException $e) {
+        } catch (ValidationException $e) {
+            $errors = $e->errors();
+            $message = 'Invalid username or password.';
+
+            // Check if it's an inactive user error
+            if (isset($errors['username']) && in_array('Account is disabled.', $errors['username'])) {
+                $message = 'Account is disabled.';
+            }
+
             return response()->json([
                 'timestamp' => now()->toISOString(),
-                'message' => 'Invalid username or password.',
+                'message' => $message,
             ], Response::HTTP_UNAUTHORIZED);
         }
     }
@@ -44,7 +53,8 @@ class AdminController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
-        $this->adminService->logout($request->user());
+        // Revoke the current access token
+        $request->user()->currentAccessToken()?->delete();
 
         return response()->json(null, Response::HTTP_OK);
     }
