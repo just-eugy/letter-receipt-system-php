@@ -1,36 +1,120 @@
-# Phase 7: Real-Time Architecture Design
+# Phase 7: Real-Time Architecture (Corrected — Laravel Only)
 
 **Generated:** 2026-10-11  
-**Based on:** Phase 2 Security & Real-Time Contract, Phase 5 API Implementation, Phase 6 Security
+**Status:** Laravel-only implementation using Laravel Reverb  
+**Previous Version:** Contained incorrect Java–PHP bridge design (now removed)
 
 ---
 
-## 1. Existing Real-Time Contract (from Phase 2)
+## 1. Architecture Decision: Laravel Reverb (Native)
 
-### 1.1 Spring Boot WebSocket/STOMP Configuration
+**Selected:** Laravel Reverb (Laravel's first-party WebSocket server)
 
-| Property | Value |
-|---|---|
-| **WebSocket Endpoint** | `ws://<host>:<port>/ws` |
-| **Protocol** | STOMP over WebSocket (RFC 6455 + STOMP) |
-| **Allowed Origins** | `*` (wildcard - insecure for production) |
-| **Broker Destinations** | `/topic/**` (simple in-memory broker) |
-| **Application Destinations** | `/app/**` (not used) |
-| **User Destinations** | `/user/**` (configured but not used) |
-| **Heartbeat** | 4000ms in / 4000ms out |
-| **Reconnection** | Disabled (`reconnectDelay: 0`) |
-| **Authentication** | None (permitAll on `/ws/**`) |
+**Rationale:**
+- ✅ Laravel-native, no external dependencies
+- ✅ No Java/PHP bridge required
+- ✅ No Redis Pub/Sub bridge needed
+- ✅ Integrates with Laravel Sanctum authentication
+- ✅ Uses Laravel Echo protocol (Pusher-compatible)
+- ✅ Runs as a separate PHP process (Docker service)
 
-### 1.2 STOMP Destinations
+**Protocol Change Notice:**
+- **Original:** STOMP over WebSocket (Spring Boot)
+- **New:** Laravel Echo protocol over WebSocket (Reverb)
+- **Frontend Impact:** React client must migrate from `@stomp/stompjs` to `laravel-echo` + `pusher-js`
+- **Approval Required:** Yes — documented in Section 6
 
-| Destination | Direction | Purpose |
-|---|---|---|
-| `/topic/deliveries` | Server → Client (broadcast) | All delivery events |
-| `/topic/reception/deliveries` | Frontend subscription (BUG) | Frontend incorrectly subscribes here |
+---
 
-### 1.3 Event Types & Payloads
+## 2. Reverb Configuration
 
-#### DELIVERY_CREATED
+### 2.1 Docker Service (`docker-compose.yml`)
+
+```yaml
+reverb:
+  image: php:8.4-cli-alpine
+  container_name: letter-receipt-reverb
+  restart: unless-stopped
+  working_dir: /var/www/html
+  volumes:
+    - ./backend:/var/www/html
+  environment:
+    - APP_ENV=${APP_ENV:-local}
+    - APP_DEBUG=${APP_DEBUG:-true}
+    - APP_URL=${APP_URL:-http://localhost:8082}
+    - REVERB_APP_ID=${REVERB_APP_ID:-local}
+    - REVERB_APP_KEY=${REVERB_APP_KEY:-local}
+    - REVERB_APP_SECRET=${REVERB_APP_SECRET:-secret}
+    - REVERB_HOST=0.0.0.0
+    - REVERB_PORT=8083
+    - REVERB_SCHEME=http
+  ports:
+    - "8083:8083"
+  command: php artisan reverb:start --host=0.0.0.0 --port=8083
+  networks:
+    - letter-receipt-php-network
+  depends_on:
+    - app
+  healthcheck:
+    test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 15s
+```
+
+### 2.2 Environment Variables (`.env`)
+
+```env
+BROADCAST_CONNECTION=reverb
+REVERB_APP_ID=local
+REVERB_APP_KEY=local
+REVERB_APP_SECRET=secret
+REVERB_HOST=localhost
+REVERB_PORT=8083
+REVERB_SCHEME=http
+```
+
+### 2.3 Laravel Configuration (`config/broadcasting.php`)
+
+```php
+'default' => env('BROADCAST_CONNECTION', 'reverb'),
+
+'connections' => [
+    'reverb' => [
+        'driver' => 'reverb',
+        'key' => env('REVERB_APP_KEY'),
+        'secret' => env('REVERB_APP_SECRET'),
+        'app_id' => env('REVERB_APP_ID'),
+        'options' => [
+            'host' => env('REVERB_HOST'),
+            'port' => env('REVERB_PORT', 443),
+            'scheme' => env('REVERB_SCHEME', 'https'),
+            'useTLS' => env('REVERB_SCHEME', 'https') === 'https',
+        ],
+    ],
+    // ... other drivers
+],
+```
+
+---
+
+## 3. Event Broadcasting Implementation
+
+### 3.1 Events
+
+| Event | Broadcast Channel | Broadcast Name | Payload |
+|-------|-------------------|----------------|---------|
+| `DeliveryCreated` | `private-deliveries` | `DELIVERY_CREATED` | Full delivery data + message |
+| `DeliveryReceived` | `private-deliveries` | `DELIVERY_STATUS_CHANGED` | Full delivery data + status |
+
+**Channel:** `private-deliveries` (private channel, requires auth)
+
+**Authorization:** `Broadcast::channel('deliveries', fn($user) => $user && in_array($user->role, ['ADMIN', 'RECEPTIONIST']));`
+
+### 3.2 Event Payloads
+
+**DeliveryCreated (`DELIVERY_CREATED`):**
 ```json
 {
   "type": "DELIVERY_CREATED",
@@ -49,7 +133,7 @@
 }
 ```
 
-#### DELIVERY_STATUS_CHANGED
+**DeliveryReceived (`DELIVERY_STATUS_CHANGED`):**
 ```json
 {
   "type": "DELIVERY_STATUS_CHANGED",
@@ -69,380 +153,236 @@
 }
 ```
 
-### 1.4 Transaction Safety
-- Uses `TransactionSynchronizationManager` to publish events **after** database commit
-- Events only fire after successful transaction commit
-- No events for rolled-back transactions
+### 3.3 Transaction Safety
 
-### 1.5 Frontend Integration (React)
-
-**Hook:** `useStomp.js` (shared singleton client)
-- **Subscription:** `/topic/reception/deliveries` (BUG - should be `/topic/deliveries`)
-- **Event Handling:** Filters for `DELIVERY_STATUS_CHANGED` type
-- **Reconnection:** Disabled (`reconnectDelay: 0`)
-- **Heartbeat:** 4000ms in/out
-- **Connection Lifecycle:** Reference-counted mount/unmount
-
-**Critical Bug:** Frontend subscribes to `/topic/reception/deliveries` but backend publishes to `/topic/deliveries`. Real-time updates **do not work**.
-
----
-
-## 2. Architecture Decision
-
-### 2.1 Evaluation Matrix
-
-| Criterion | Laravel Reverb | Laravel + Pusher/Ably | STOMP in Laravel | Spring Boot + Redis (Transitional) |
-|---|---|---|---|---|
-| **STOMP Compatibility** | ❌ No (Echo protocol) | ❌ No (Echo protocol) | ✅ Yes (complex) | ✅ Yes (existing) |
-| **Frontend Changes** | Required (STOMP→Echo) | Required (STOMP→Echo) | None | None |
-| **Implementation Effort** | Low | Low | High | Medium |
-| **Operational Complexity** | Medium (PHP server) | Low (managed) | High (ReactPHP/Swoole) | Low (existing) |
-| **Docker Deployment** | Native | Native | Complex | Native |
-| **Auth Integration** | Laravel Sanctum | Laravel Sanctum | Custom | Spring Security |
-| **Production Ready** | Yes (v1.0+) | Yes | Experimental | Proven |
-| **License** | MIT | Commercial | MIT | Apache 2.0 |
-
-### 2.2 Decision: **Transitional Architecture (Option 4)**
-
-**Selected:** **Spring Boot WebSocket + Laravel API + Redis Pub/Sub**
-
-**Rationale:**
-1. **Zero frontend changes** - preserves existing STOMP client
-2. **Preserves STOMP protocol** - maintains contract exactly
-3. **Lower risk** - Spring Boot WebSocket already proven in production
-4. **Incremental migration** - Laravel API handles business logic, Spring Boot handles real-time
-4. **Future flexibility** - Can migrate to Laravel Reverb in Phase 8 with frontend approval
-
-### 2.3 Architecture Diagram
-
-```
-┌─────────────────┐     Redis Pub/Sub      ┌──────────────────────┐
-│   Laravel API   │ ─────────────────────→ │  Spring Boot WS      │
-│  (Business      │   Channel: "deliveries"│  (STOMP Server)      │
-│   Logic)        │                        │  /ws endpoint        │
-│                 │                        │  /topic/deliveries   │
-│ - Creates       │                        │                      │
-│   deliveries    │                        │  Broadcasts to       │
-│ - Receives      │                        │  /topic/deliveries   │
-│   deliveries    │                        │                      │
-│ - Publishes to  │                        │  Frontend (React)    │
-│   Redis         │                        │  STOMP Client        │
-└─────────────────┘                        └──────────────────────┘
-       ↑                                           ↑
-       │                    HTTP/REST               │
-       └────────────────────────────────────────────┘
-```
-
----
-
-## 3. Implementation Specification
-
-### 3.1 Redis Channel & Message Format
-
-**Channel:** `deliveries`
-
-**Message Format (JSON):**
-```json
-{
-  "type": "DELIVERY_CREATED" | "DELIVERY_STATUS_CHANGED",
-  "deliveryId": 123,
-  "delivery": { ... },
-  "status": "DELIVERED" | "RECEIVED",
-  "message": "New delivery received"
-}
-```
-
-### 3.2 Laravel Side: Event Publishing
-
-**Service:** `RealtimeEventPublisher` (new)
+Events are dispatched via `DB::afterCommit()` to ensure they only fire after successful database commit:
 
 ```php
-// In DeliveryService after successful commit
-RealtimeEventPublisher::publishDeliveryCreated($delivery);
-RealtimeEventPublisher::publishDeliveryReceived($delivery);
-```
-
-**Redis Publishing:**
-```php
-Redis::publish('deliveries', json_encode([
-    'type' => 'DELIVERY_CREATED',
-    'deliveryId' => $delivery->id,
-    'delivery' => $delivery->toArray(),
-    'message' => 'New delivery received',
-]));
-```
-
-**Transaction Safety:** Use `DB::afterCommit()` callback (Laravel equivalent of Spring's `TransactionSynchronizationManager`)
-
-### 3.3 Spring Boot Side: Redis Consumer
-
-**New Component:** `RedisDeliveryEventConsumer`
-
-```java
-@Component
-public class RedisDeliveryEventConsumer {
-    
-    @Autowired private SimpMessagingTemplate messagingTemplate;
-    
-    @RedisListener(topics = "deliveries")
-    public void onDeliveryEvent(String json) {
-        messagingTemplate.convertAndSend("/topic/deliveries", json);
-    }
-}
-```
-
-**Configuration:**
-```yaml
-spring:
-  redis:
-    host: redis
-    port: 6379
-  data:
-    redis:
-      repositories:
-        enabled: false
-```
-
-### 3.4 Docker Configuration
-
-**New Service in `docker-compose.yml` (Spring Boot project):**
-```yaml
-services:
-  redis:
-    image: redis:7-alpine
-    container_name: letter-receipt-redis
-    networks:
-      - letter-receipt-network
-    volumes:
-      - letter-receipt-redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-networks:
-  letter-receipt-network:
-    external: true
-
-volumes:
-  letter-receipt-redis-data:
-```
-
-**Laravel `.env` additions:**
-```env
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_PASSWORD=null
+DB::afterCommit(function () use ($delivery) {
+    event(new DeliveryCreated($delivery));
+});
 ```
 
 ---
 
-## 4. Security Hardening
+## 4. Frontend Migration Required
 
-### 4.1 WebSocket Authentication (Required for Production)
+### 4.1 Protocol Change
 
-**Current Gap:** No authentication on WebSocket connection.
+| Aspect | Old (Spring Boot) | New (Laravel Reverb) |
+|--------|-------------------|----------------------|
+| Protocol | STOMP over WebSocket | Laravel Echo (Pusher protocol) |
+| Library | `@stomp/stompjs` | `laravel-echo` + `pusher-js` |
+| Endpoint | `ws://host:8081/ws` | `ws://host:8083` (or `wss://`) |
+| Auth | None (permitAll) | Sanctum token / session cookie |
+| Subscription | `/topic/deliveries` | `private-deliveries` (private channel) |
 
-**Required Implementation:**
-1. **JWT Token on STOMP CONNECT:**
-   - Frontend sends `Authorization: Bearer <token>` in CONNECT headers
-   - Spring Boot validates token via shared secret or JWKS
-   - Reject unauthorized connections
+### 4.2 Minimal Frontend Changes
 
-2. **Origin Validation:**
-   - Replace `setAllowedOriginPatterns("*")` with explicit allowed origins
-   - Configure via environment variable
+**Install:**
+```bash
+npm install laravel-echo pusher-js
+```
 
-3. **Authorization on Subscriptions:**
-   - Validate user role for `/topic/deliveries` access
-   - Only RECEPTIONIST/ADMIN can subscribe
-
-### 4.2 Redis Security
-- Redis in isolated Docker network (not exposed to host)
-- Password authentication if exposed
-- TLS for production
-
----
-
-## 5. Frontend Compatibility
-
-### 5.1 Required Changes (If Any)
-
-| Item | Current | Required | Action |
-|---|---|---|---|
-| **Subscription Topic** | `/topic/reception/deliveries` | `/topic/deliveries` | **Fix bug** - change subscription |
-| **WebSocket URL** | `ws://localhost:8081/ws` | Same | No change |
-| **Protocol** | STOMP | STOMP | No change |
-| **Event Types** | `DELIVERY_CREATED`, `DELIVERY_STATUS_CHANGED` | Same | No change |
-| **Payload Structure** | Matches Java | Same | No change |
-
-### 5.2 Required Frontend Change (Bug Fix)
-
-**File:** `useDelivery.js` line 49
+**Replace `useStomp.js` with `useEcho.js`:**
 ```javascript
-// FROM (buggy):
-const unsubscribe = subscribe('/topic/reception/deliveries', (event) => {
+import Echo from 'laravel-echo';
+import Pusher from 'pusher-js';
 
-// TO (fixed):
-const unsubscribe = subscribe('/topic/deliveries', (event) => {
+window.Pusher = Pusher;
+
+const echo = new Echo({
+  broadcaster: 'reverb',
+  key: import.meta.env.VITE_REVERB_APP_KEY || 'local',
+  wsHost: import.meta.env.VITE_REVERB_HOST || 'localhost',
+  wsPort: import.meta.env.VITE_REVERB_PORT || 8083,
+  wssPort: import.meta.env.VITE_REVERB_PORT || 8083,
+  forceTLS: false,
+  disableStats: true,
+  enabledTransports: ['ws', 'wss'],
+  authEndpoint: '/broadcasting/auth',
+  auth: {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  },
+});
 ```
 
-**This is the only required frontend change** to make real-time work.
+**Update `useDelivery.js` subscription:**
+```javascript
+// OLD (STOMP)
+const unsubscribe = subscribe('/topic/deliveries', (event) => { ... });
+
+// NEW (Laravel Echo)
+const channel = echo.private('deliveries');
+channel.listen('DELIVERY_CREATED', (event) => { ... });
+channel.listen('DELIVERY_STATUS_CHANGED', (event) => { ... });
+
+// Cleanup
+return () => {
+  echo.leaveChannel('private-deliveries');
+};
+```
+
+**Approval Required:** This frontend change must be approved before deployment.
 
 ---
 
-## 6. Docker Compose Integration
+## 5. Docker Compose (Final)
 
-### 6.1 Spring Boot Project (New Redis Service)
-
-```yaml
-# Add to existing Spring Boot docker-compose.yml
-services:
-  redis:
-    image: redis:7-alpine
-    container_name: letter-receipt-redis
-    networks:
-      - letter-receipt-network
-    volumes:
-      - letter-receipt-redis-data:/data
-    command: ["redis-server", "--appendonly", "yes"]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-networks:
-  letter-receipt-network:
-    external: true
-
-volumes:
-  letter-receipt-redis-data:
-```
-
-### 6.2 Laravel Project (Redis Connection)
-
-**Add to Laravel `docker-compose.yml`:**
 ```yaml
 services:
   app:
-    # ... existing config
+    build:
+      context: ./backend
+      dockerfile: ../Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: letter-receipt-php-app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    ports:
+      - "8082:8000"
     environment:
-      # ... existing env
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      - APP_ENV=${APP_ENV:-local}
+      - APP_DEBUG=${APP_DEBUG:-true}
+      - APP_URL=${APP_URL:-http://localhost:8082}
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-letter_receipt_php}
+      - DB_USERNAME=${DB_USERNAME:-laravel}
+      - DB_PASSWORD=${DB_PASSWORD}
     networks:
-      - letter-receipt-network
       - letter-receipt-php-network
     depends_on:
-      # ... existing
-      redis:
+      db:
         condition: service_healthy
-
-  # Redis service (shared with Spring Boot)
-  redis:
-    image: redis:7-alpine
-    container_name: letter-receipt-redis
-    networks:
-      - letter-receipt-network
-    volumes:
-      - letter-receipt-redis-data:/data
-    command: ["redis-server", "--appendonly", "yes"]
+      reverb:
+        condition: service_started
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "php", "artisan", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  reverb:
+    image: php:8.4-cli-alpine
+    container_name: letter-receipt-reverb
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - APP_DEBUG=${APP_DEBUG:-true}
+      - APP_URL=${APP_URL:-http://localhost:8082}
+      - REVERB_APP_ID=${REVERB_APP_ID:-local}
+      - REVERB_APP_KEY=${REVERB_APP_KEY:-local}
+      - REVERB_APP_SECRET=${REVERB_APP_SECRET:-secret}
+      - REVERB_HOST=0.0.0.0
+      - REVERB_PORT=8083
+      - REVERB_SCHEME=http
+    ports:
+      - "8083:8083"
+    command: php artisan reverb:start --host=0.0.0.0 --port=8083
+    networks:
+      - letter-receipt-php-network
+    depends_on:
+      - app
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8083"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  db:
+    image: mysql:8.4
+    container_name: letter-receipt-php-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_DATABASE=${DB_DATABASE:-letter_receipt_php}
+      - MYSQL_USER=${DB_USERNAME:-laravel}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+    volumes:
+      - letter-receipt-php-db-data:/var/lib/mysql
+    networks:
+      - letter-receipt-php-network
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 20s
 
 networks:
-  letter-receipt-network:
-    external: true
   letter-receipt-php-network:
     name: letter-receipt-php-network
     driver: bridge
 
 volumes:
-  letter-receipt-redis-data:
-    name: letter-receipt-redis-data
+  letter-receipt-php-db-data:
+    name: letter-receipt-php-db-data
 ```
 
-**Note:** Both projects share the same Redis container via the external network `letter-receipt-network`.
+---
+
+## 6. Removed Components (Java–PHP Bridge)
+
+| Component | Status | Reason |
+|-----------|--------|--------|
+| `RealtimeEventPublisher` | **Deleted** | Was Redis bridge to Spring Boot |
+| `Redis` in `DeliveryService` | **Removed** | No longer needed |
+| `Redis` service in `docker-compose.yml` | **Removed** | Not needed for Laravel-only |
+| `REDIS_*` env vars | **Removed** | Not needed |
+| `redis` PHP extension | **Not installed** | Not needed |
 
 ---
 
-## 7. Implementation Plan
+## 7. Test Coverage
 
-### Phase 7A: Infrastructure (Week 1)
-- [ ] Add Redis to Spring Boot docker-compose.yml
-- [ ] Add Redis to Laravel docker-compose.yml (shared)
-- [ ] Configure Laravel Redis connection
-- [ ] Verify network connectivity between containers
-
-### Phase 7B: Laravel Event Publishing (Week 1-2)
-- [ ] Create `RealtimeEventPublisher` service
-- [ ] Integrate with `DeliveryService` using `DB::afterCommit()`
-- [ ] Publish `DELIVERY_CREATED` and `DELIVERY_STATUS_CHANGED` to Redis
-- [ ] Unit test event publishing
-
-### Phase 7C: Spring Boot Redis Consumer (Week 2)
-- [ ] Add `spring-boot-starter-data-redis` dependency
-- [ ] Create `RedisDeliveryEventConsumer` with `@RedisListener`
-- [ ] Forward messages to `/topic/deliveries` via `SimpMessagingTemplate`
-- [ ] Test end-to-end message flow
-
-### Phase 7D: Security & Testing (Week 2-3)
-- [ ] Add JWT authentication to Spring Boot STOMP CONNECT
-- [ ] Configure allowed origins
-- [ ] Add role-based subscription authorization
-- [ ] Write integration tests for event flow
-- [ ] Test reconnection, duplicate subscriptions
-
-### Phase 7E: Frontend Bug Fix (Week 3)
-- [ ] Fix subscription topic in `useDelivery.js` (`/topic/deliveries`)
-- [ ] Test real-time updates in browser
+| Test | Status |
+|------|--------|
+| `RealtimeEventTest::test_delivery_created_event_broadcasts` | ✅ Pass |
+| `RealtimeEventTest::test_delivery_received_event_broadcasts` | ✅ Pass |
+| `RealtimeEventTest::test_delivery_created_broadcasts_on_correct_channel` | ✅ Pass |
+| `RealtimeEventTest::test_delivery_received_broadcasts_on_correct_channel` | ✅ Pass |
+| `RealtimeEventTest::test_delivery_created_broadcast_payload_structure` | ✅ Pass |
+| `RealtimeEventTest::test_delivery_received_broadcast_payload_structure` | ✅ Pass |
+| Core API tests (59 tests) | ✅ All Pass |
 
 ---
 
-## 8. Testing Strategy
+## 7. Pending Approvals
 
-### 8.1 Unit Tests (Laravel)
-- `RealtimeEventPublisherTest` - verifies Redis publishing
-- `DeliveryServiceTest` - verifies events published after commit
-
-### 8.2 Integration Tests (Spring Boot)
-- `RedisDeliveryEventConsumerTest` - verifies Redis → STOMP forwarding
-- `WebSocketIntegrationTest` - full connection → subscription → event flow
-
-### 8.3 End-to-End Tests
-- Create delivery via Laravel API → verify Spring Boot broadcasts → verify frontend receives
-- Receive delivery via Laravel API → verify broadcast → verify frontend updates
+1. **Frontend Protocol Migration:** React client must migrate from STOMP to Laravel Echo (documented in Section 4)
+2. **Production TLS:** Configure `REVERB_SCHEME=https`, `REVERB_PORT=443`, valid certificates for production
+3. **Reverb Scaling:** For high load, consider multiple Reverb workers behind load balancer
 
 ---
 
-## 9. Open Questions for Approval
+## 8. Rollback Plan
 
-1. **Frontend Bug Fix:** Approve changing subscription from `/topic/reception/deliveries` to `/topic/deliveries`?
-2. **WebSocket Auth:** Implement JWT auth on STOMP CONNECT in Phase 7, or defer to Phase 8?
-3. **Redis Persistence:** Enable AOF persistence for durability?
-4. **Monitoring:** Add Redis/STOMP metrics to Prometheus/Grafana?
-5. **Phase 8 Direction:** Migrate to Laravel Reverb (requires frontend STOMP→Echo migration) or continue transitional?
-
----
-
-## 10. Rollback Plan
-
-If issues arise:
-1. Disable Laravel Redis publishing (feature flag)
-2. Spring Boot continues operating independently
-3. Frontend continues working (no protocol change)
-4. No database migrations required for rollback
+If issues arise with Reverb:
+1. Disable broadcasting: `BROADCAST_CONNECTION=log` or `null`
+2. Events still fire locally (audit trail preserved in `delivery_events` table)
+3. No database migrations required for rollback
+4. Spring Boot backend remains untouched for emergency rollback
 
 ---
 
-## 11. Approval Checkpoint
+## 9. Conclusion
 
-**Ready for Phase 7 implementation approval.**
+**Phase 7 Complete:** Laravel now independently implements real-time functionality via Laravel Reverb. The incorrect Java–PHP Redis bridge has been completely removed. Laravel is now a fully independent backend replacement for Spring Boot.
 
-**Key Decision:** Transitional architecture with Spring Boot WebSocket + Laravel API + Redis Pub/Sub. Preserves STOMP protocol, zero frontend protocol changes (only bug fix), incremental risk.
+**Next Phase:** Phase 8 (Frontend Integration & Testing) — requires frontend protocol migration approval.

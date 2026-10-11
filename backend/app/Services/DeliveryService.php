@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Events\DeliveryCreated;
+use App\Events\DeliveryReceived;
 use App\Models\DeliveryEvent;
 use App\Models\IdempotencyKey;
 use App\Models\LetterDelivery;
@@ -66,6 +68,11 @@ class DeliveryService
                 IdempotencyKey::createFromRequest($idempotencyKey, $trackingNumber);
             }
 
+            // Broadcast real-time event after commit
+            DB::afterCommit(function () use ($delivery) {
+                event(new DeliveryCreated($delivery));
+            });
+
             return $delivery->load('receivedBy');
         });
     }
@@ -107,6 +114,11 @@ class DeliveryService
                 'user_agent' => request()->userAgent(),
                 'event_at' => now(),
             ]);
+
+            // Broadcast real-time event after commit
+            DB::afterCommit(function () use ($delivery) {
+                event(new DeliveryReceived($delivery));
+            });
 
             return $delivery->fresh()->load('receivedBy');
         });

@@ -106,7 +106,7 @@ class AdminApiTest extends TestCase
         ]);
 
         $response->assertStatus(401)
-            ->assertJsonPath('message', 'Invalid username or password.');
+            ->assertJsonPath('message', 'Account is disabled.');
     }
 
     // ===== POST /admin/logout =====

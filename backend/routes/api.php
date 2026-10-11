@@ -44,6 +44,10 @@ Route::middleware('api')->prefix('admin')->group(function () {
     // Admin-only endpoints
     Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
         Route::post('/logout', [AdminController::class, 'logout']);
+    });
+    
+    // Current user endpoint (accessible to both ADMIN and RECEPTIONIST)
+    Route::middleware(['auth:sanctum', 'role:receptionist,admin'])->group(function () {
         Route::get('/me', [AdminController::class, 'me']);
     });
 });

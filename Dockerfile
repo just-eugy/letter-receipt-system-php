@@ -1,20 +1,29 @@
-FROM php:8.4-fpm-alpine
+FROM php:8.4-fpm-alpine3.20
 
 ARG UID=1000
 ARG GID=1000
 
-# Install mlocati/php-extension-installer for pre-compiled extensions
-ADD --chmod=0755 https://github.com/mlocati/docker-php-extension-installer/releases/latest/download/install-php-extensions /usr/local/bin/
-
 RUN apk add --no-cache \
     git \
     unzip \
-    && install-php-extensions \
+    supervisor \
+    libzip-dev \
+    libpng-dev \
+    libjpeg-turbo-dev \
+    freetype-dev \
+    oniguruma-dev \
+    linux-headers \
+    $PHPIZE_DEPS \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install -j"$(nproc)" \
     pdo_mysql \
     zip \
     gd \
+    mbstring \
     bcmath \
-    && apk del git unzip
+    opcache \
+    pcntl \
+    && apk del $PHPIZE_DEPS
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
@@ -38,11 +47,17 @@ RUN mkdir -p storage/framework/{cache,sessions,views,testing} \
     && chown -R laravel:laravel storage bootstrap/cache \
     && chmod -R ug+rwX storage bootstrap/cache
 
-USER laravel
+# Copy supervisor config
+COPY docker/supervisor/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-EXPOSE 8000
+# Create log directory
+RUN mkdir -p /var/log && chown -R laravel:laravel /var/log
+
+EXPOSE 8000 8083
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD php artisan --version || exit 1
 
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+USER laravel
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
