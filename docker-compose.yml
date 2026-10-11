@@ -1,0 +1,68 @@
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: ../Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: letter-receipt-php-app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./backend:/var/www/html
+      - ./docker/php/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    ports:
+      - "8082:8000"
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+      - APP_DEBUG=${APP_DEBUG:-true}
+      - APP_URL=${APP_URL:-http://localhost:8082}
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-letter_receipt_php}
+      - DB_USERNAME=${DB_USERNAME:-laravel}
+      - DB_PASSWORD=${DB_PASSWORD}
+    networks:
+      - letter-receipt-php-network
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "php", "artisan", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  db:
+    image: mysql:8.4
+    container_name: letter-receipt-php-db
+    restart: unless-stopped
+    environment:
+      - MYSQL_DATABASE=${DB_DATABASE:-letter_receipt_php}
+      - MYSQL_USER=${DB_USERNAME:-laravel}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+    volumes:
+      - letter-receipt-php-db-data:/var/lib/mysql
+    networks:
+      - letter-receipt-php-network
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+networks:
+  letter-receipt-php-network:
+    name: letter-receipt-php-network
+    driver: bridge
+
+volumes:
+  letter-receipt-php-db-data:
+    name: letter-receipt-php-db-data
