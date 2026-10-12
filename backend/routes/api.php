@@ -2,10 +2,14 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Broadcast;
 use App\Http\Controllers\Api\PublicDeliveryController;
 use App\Http\Controllers\Api\ReceptionController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\AdminController;
+
+// Register broadcasting auth route with HTTP Basic Auth support
+Broadcast::routes(['middleware' => ['api', 'auth.basic']]);
 
 // Public API endpoints (no authentication required)
 Route::middleware('api')->prefix('public')->group(function () {
