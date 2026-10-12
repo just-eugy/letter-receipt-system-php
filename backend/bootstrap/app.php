@@ -18,11 +18,17 @@ return Application::configure(basePath: dirname(__DIR__))
         channels: __DIR__.'/../routes/channels.php',
         health: '/up',
     )
-    ->withMiddleware(function (Middleware $middleware): void {
+->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'role' => \App\Http\Middleware\RoleMiddleware::class,
             'auth.basic' => \App\Http\Middleware\HttpBasicAuth::class,
         ]);
+
+        // Ensure HttpBasicAuth runs before Sanctum authentication middleware
+        $middleware->prependToPriorityList(
+            \Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests::class,
+            \App\Http\Middleware\HttpBasicAuth::class
+        );
 
         // Global middleware
         $middleware->prepend(\App\Http\Middleware\SecurityHeaders::class);

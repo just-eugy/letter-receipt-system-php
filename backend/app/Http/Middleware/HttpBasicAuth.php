@@ -15,7 +15,7 @@ class HttpBasicAuth
      */
     public function handle(Request $request, Closure $next): Response
     {
-        // Skip if already authenticated via Sanctum
+        // Skip if already authenticated via request user resolver
         if ($request->user()) {
             return $next($request);
         }
@@ -40,7 +40,12 @@ class HttpBasicAuth
             return $this->unauthorizedResponse();
         }
 
-        // Log the user in for this request
+        // Set user resolver for stateless authentication
+        $request->setUserResolver(function () use ($user) {
+            return $user;
+        });
+
+        // Also log in to default guard for any middleware that uses Auth::user()
         Auth::login($user);
 
         return $next($request);

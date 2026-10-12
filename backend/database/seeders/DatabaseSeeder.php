@@ -15,11 +15,13 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
+        // Create admin user from environment variables
+        User::create([
+            'username' => env('APP_BOOTSTRAP_ADMIN_USERNAME', 'admin'),
+            'password' => env('APP_BOOTSTRAP_ADMIN_PASSWORD', 'password'),
+            'display_name' => env('APP_BOOTSTRAP_ADMIN_DISPLAY_NAME', 'Admin'),
+            'role' => 'ADMIN',
+            'active' => true,
         ]);
     }
 }
