@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ReceptionWebController.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.web</a> &gt; <span class="el_source">ReceptionWebController.java</span></div><h1>ReceptionWebController.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.web;
+
+import com.office.letterreceipt.model.DeliveryStatus;
+import com.office.letterreceipt.repository.DeliveryEventRepository;
+import com.office.letterreceipt.repository.LetterDeliveryRepository;
+import com.office.letterreceipt.service.DeliveryService;
+import jakarta.servlet.http.HttpServletRequest;
+import java.security.Principal;
+import java.time.Clock;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
+
+@Controller
+@RequestMapping(&quot;/reception&quot;)
+public class ReceptionWebController {
+    private final LetterDeliveryRepository deliveries;
+    private final DeliveryEventRepository events;
+    private final DeliveryService service;
+    private final Clock clock;
+    private final String organizationName;
+
+    public ReceptionWebController(
+            LetterDeliveryRepository deliveries,
+            DeliveryEventRepository events,
+            DeliveryService service,
+            Clock clock,
+<span class="fc" id="L40">            @Value(&quot;${app.organization-name:Our Office}&quot;) String organizationName) {</span>
+<span class="fc" id="L41">        this.deliveries = deliveries;</span>
+<span class="fc" id="L42">        this.events = events;</span>
+<span class="fc" id="L43">        this.service = service;</span>
+<span class="fc" id="L44">        this.clock = clock;</span>
+<span class="fc" id="L45">        this.organizationName = organizationName;</span>
+<span class="fc" id="L46">    }</span>
+
+    @GetMapping
+    public String dashboard(Model model) {
+<span class="fc" id="L50">        LocalDate today = LocalDate.now(clock);</span>
+<span class="fc" id="L51">        LocalDateTime start = today.atStartOfDay();</span>
+<span class="fc" id="L52">        LocalDateTime end = today.plusDays(1).atStartOfDay();</span>
+<span class="fc" id="L53">        model.addAttribute(&quot;organizationName&quot;, organizationName);</span>
+<span class="fc" id="L54">        model.addAttribute(&quot;pending&quot;, deliveries.findTop100ByStatusOrderByDeliveredAtAsc(DeliveryStatus.DELIVERED));</span>
+<span class="fc" id="L55">        model.addAttribute(&quot;recent&quot;, deliveries.findTop20ByOrderByDeliveredAtDesc());</span>
+<span class="fc" id="L56">        model.addAttribute(&quot;pendingCount&quot;, deliveries.countByStatus(DeliveryStatus.DELIVERED));</span>
+<span class="fc" id="L57">        model.addAttribute(&quot;todayCount&quot;, deliveries.countByDeliveredAtBetween(start, end));</span>
+<span class="fc" id="L58">        model.addAttribute(&quot;todayReceived&quot;, deliveries.countByStatusAndReceivedAtBetween(DeliveryStatus.RECEIVED, start, end));</span>
+<span class="fc" id="L59">        return &quot;reception/dashboard&quot;;</span>
+    }
+
+    @PostMapping(&quot;/deliveries/{id}/receive&quot;)
+    public String receive(
+            @PathVariable Long id,
+            @RequestParam(required = false) String remarks,
+            Principal principal,
+            HttpServletRequest request,
+            RedirectAttributes redirect) {
+<span class="nc" id="L69">        service.receive(id, principal.getName(), remarks, request);</span>
+<span class="nc" id="L70">        redirect.addFlashAttribute(&quot;success&quot;, &quot;Receipt confirmed successfully.&quot;);</span>
+<span class="nc" id="L71">        return &quot;redirect:/reception&quot;;</span>
+    }
+
+    @GetMapping(&quot;/deliveries/{id}&quot;)
+    public String detail(@PathVariable Long id, Model model) {
+<span class="nc" id="L76">        var delivery = deliveries.findById(id)</span>
+<span class="nc" id="L77">            .orElseThrow(() -&gt; new ResponseStatusException(HttpStatus.NOT_FOUND, &quot;Delivery not found.&quot;));</span>
+<span class="nc" id="L78">        model.addAttribute(&quot;organizationName&quot;, organizationName);</span>
+<span class="nc" id="L79">        model.addAttribute(&quot;delivery&quot;, delivery);</span>
+<span class="nc" id="L80">        model.addAttribute(&quot;events&quot;, events.findByDeliveryIdOrderByEventAtAsc(id));</span>
+<span class="nc" id="L81">        return &quot;reception/detail&quot;;</span>
+    }
+
+    @GetMapping(&quot;/deliveries&quot;)
+    public String register(
+            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = &quot;&quot;) String q,
+            @RequestParam(defaultValue = &quot;0&quot;) int page,
+            Model model) {
+<span class="nc" id="L90">        DeliveryStatus parsed = null;</span>
+<span class="nc bnc" id="L91" title="All 4 branches missed.">        if (status != null &amp;&amp; !status.isBlank()) {</span>
+            try {
+<span class="nc" id="L93">                parsed = DeliveryStatus.valueOf(status);</span>
+<span class="nc" id="L94">            } catch (IllegalArgumentException ignored) {</span>
+<span class="nc" id="L95">                parsed = null;</span>
+<span class="nc" id="L96">            }</span>
+        }
+<span class="nc" id="L98">        var result = deliveries.search(</span>
+            parsed,
+<span class="nc bnc" id="L100" title="All 2 branches missed.">            q == null ? &quot;&quot; : q.trim(),</span>
+<span class="nc" id="L101">            PageRequest.of(Math.max(page, 0), 25, Sort.by(&quot;deliveredAt&quot;).descending()));</span>
+<span class="nc" id="L102">        model.addAttribute(&quot;organizationName&quot;, organizationName);</span>
+<span class="nc" id="L103">        model.addAttribute(&quot;deliveries&quot;, result);</span>
+<span class="nc" id="L104">        model.addAttribute(&quot;q&quot;, q);</span>
+<span class="nc" id="L105">        model.addAttribute(&quot;status&quot;, status);</span>
+<span class="nc" id="L106">        return &quot;reception/register&quot;;</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

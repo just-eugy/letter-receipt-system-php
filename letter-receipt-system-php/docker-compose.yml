@@ -1,0 +1,70 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    container_name: letter-receipt-php-app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    volumes:
+      - ./docker/php/opcache.ini:/usr/local/etc/php/conf.d/opcache.ini
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/conf.d:/etc/nginx/conf.d
+    ports:
+      - "8082:8000"
+      - "8083:8083"
+    env_file:
+      - ./backend/.env
+    environment:
+      - APP_ENV=production
+      - APP_DEBUG=false
+    networks:
+      - letter-receipt-php-network
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  db:
+    image: mysql:8.4
+    container_name: letter-receipt-php-db
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      - MYSQL_DATABASE=${DB_DATABASE}
+      - MYSQL_USER=${DB_USERNAME}
+      - MYSQL_PASSWORD=${DB_PASSWORD}
+      - MYSQL_ROOT_PASSWORD=${DB_ROOT_PASSWORD}
+    volumes:
+      - letter-receipt-php-db-data:/var/lib/mysql
+    networks:
+      - letter-receipt-php-network
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=200
+      - --innodb-buffer-pool-size=256M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+networks:
+  letter-receipt-php-network:
+    name: letter-receipt-php-network
+    driver: bridge
+
+volumes:
+  letter-receipt-php-db-data:
+    name: letter-receipt-php-db-data

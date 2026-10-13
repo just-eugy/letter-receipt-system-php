@@ -1,0 +1,142 @@
+package com.office.letterreceipt.service;
+
+import com.office.letterreceipt.dto.CreateDeliveryRequest;
+import com.office.letterreceipt.model.DeliveryEventType;
+import com.office.letterreceipt.model.DeliveryStatus;
+import com.office.letterreceipt.model.LetterDelivery;
+import com.office.letterreceipt.model.Role;
+import com.office.letterreceipt.model.UserAccount;
+import com.office.letterreceipt.repository.DeliveryEventRepository;
+import com.office.letterreceipt.repository.IdempotencyKeyRepository;
+import com.office.letterreceipt.repository.LetterDeliveryRepository;
+import com.office.letterreceipt.repository.UserAccountRepository;
+import com.office.letterreceipt.websocket.WebSocketEventPublisher;
+import jakarta.servlet.http.HttpServletRequest;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Optional;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class DeliveryServiceTest {
+    @Test
+    void createUsesServerTimeAndRandomTrackingToken() {
+        LetterDeliveryRepository deliveries = mock(LetterDeliveryRepository.class);
+        DeliveryEventRepository events = mock(DeliveryEventRepository.class);
+        UserAccountRepository users = mock(UserAccountRepository.class);
+        IdempotencyKeyRepository idempotencyKeys = mock(IdempotencyKeyRepository.class);
+        WebSocketEventPublisher wsPublisher = mock(WebSocketEventPublisher.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        Clock clock = Clock.fixed(Instant.parse("2026-09-14T10:47:21Z"), ZoneId.of("Africa/Accra"));
+
+        when(deliveries.existsByTrackingNumberIgnoreCase(anyString())).thenReturn(false);
+        when(deliveries.save(any(LetterDelivery.class))).thenAnswer(invocation -> {
+            LetterDelivery delivery = invocation.getArgument(0);
+            delivery.setId(42L);
+            return delivery;
+        });
+        when(idempotencyKeys.findByIdempotencyKey(anyString())).thenReturn(Optional.empty());
+
+        DeliveryService service = new DeliveryService(
+            deliveries, events, users, idempotencyKeys, clock, wsPublisher);
+        LetterDelivery delivery = service.create(
+            new CreateDeliveryRequest(
+                "Kwame Mensah", "0200000000", null, "CEO"),
+            null,
+            request);
+
+        assertTrue(delivery.getTrackingNumber().matches("REF-\\d{4}-[A-Z0-9]{6}.*"), "Tracking number was: " + delivery.getTrackingNumber());
+        assertFalse(delivery.getTrackingNumber().matches("LTR-\\d{4}-\\d+"));
+        assertFalse(delivery.getTrackingNumber().contains("000042"));
+        assertEquals(LocalDateTime.of(2026, 9, 14, 10, 47, 21), delivery.getDeliveredAt());
+        assertEquals(DeliveryStatus.DELIVERED, delivery.getStatus());
+        verify(events).save(argThat(event ->
+            event.getEventType() == DeliveryEventType.DELIVERED && event.getActorName().equals("Kwame Mensah")));
+        verify(wsPublisher).notifyDeliveryCreated(delivery);
+    }
+
+    @Test
+    void createPersistsAllDeliveryFields() {
+        LetterDeliveryRepository deliveries = mock(LetterDeliveryRepository.class);
+        DeliveryEventRepository events = mock(DeliveryEventRepository.class);
+        UserAccountRepository users = mock(UserAccountRepository.class);
+        IdempotencyKeyRepository idempotencyKeys = mock(IdempotencyKeyRepository.class);
+        WebSocketEventPublisher wsPublisher = mock(WebSocketEventPublisher.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        Clock clock = Clock.fixed(Instant.parse("2026-09-14T10:47:21Z"), ZoneId.of("Africa/Accra"));
+
+        when(deliveries.existsByTrackingNumberIgnoreCase(anyString())).thenReturn(false);
+        when(deliveries.save(any(LetterDelivery.class))).thenAnswer(invocation -> {
+            LetterDelivery delivery = invocation.getArgument(0);
+            delivery.setId(42L);
+            return delivery;
+        });
+        when(idempotencyKeys.findByIdempotencyKey(anyString())).thenReturn(Optional.empty());
+
+        DeliveryService service = new DeliveryService(
+            deliveries, events, users, idempotencyKeys, clock, wsPublisher);
+        LetterDelivery delivery = service.create(
+            new CreateDeliveryRequest(
+                "Nana Akufo Addo", "0278921346", "yamoley@hotmail.com", "Chief Executive Officer"),
+            null,
+            request);
+
+        assertEquals("Nana Akufo Addo", delivery.getDeliveryPersonName());
+        assertEquals("0278921346", delivery.getDeliveryPersonPhone());
+        assertEquals("yamoley@hotmail.com", delivery.getDeliveryPersonEmail());
+        assertEquals("Chief Executive Officer", delivery.getRecipientTitle());
+        assertEquals(DeliveryStatus.DELIVERED, delivery.getStatus());
+        assertNotNull(delivery.getTrackingNumber());
+        assertEquals(15, delivery.getTrackingNumber().length(), "Tracking number must be exactly 15 characters");
+        assertFalse(delivery.getTrackingNumber().contains("\u0000"), "Tracking number must not contain null characters");
+    }
+
+    @Test
+    void receiveRecordsAuthenticatedStaffAndServerTime() {
+        LetterDeliveryRepository deliveries = mock(LetterDeliveryRepository.class);
+        DeliveryEventRepository events = mock(DeliveryEventRepository.class);
+        UserAccountRepository users = mock(UserAccountRepository.class);
+        IdempotencyKeyRepository idempotencyKeys = mock(IdempotencyKeyRepository.class);
+        WebSocketEventPublisher wsPublisher = mock(WebSocketEventPublisher.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        when(request.getRemoteAddr()).thenReturn("127.0.0.1");
+        Clock clock = Clock.fixed(Instant.parse("2026-09-14T10:49:00Z"), ZoneId.of("Africa/Accra"));
+        LetterDelivery delivery = new LetterDelivery();
+        delivery.setId(42L);
+        delivery.setStatus(DeliveryStatus.DELIVERED);
+        delivery.setTrackingNumber("K7M2-9QWX-4NPH");
+        UserAccount receiver = new UserAccount();
+        receiver.setId(2L);
+        receiver.setUsername("reception");
+        receiver.setDisplayName("Front Desk");
+        receiver.setRole(Role.RECEPTIONIST);
+        receiver.setActive(true);
+        when(deliveries.findById(42L)).thenReturn(Optional.of(delivery));
+        when(users.findByUsernameIgnoreCase("reception")).thenReturn(Optional.of(receiver));
+        when(deliveries.save(any(LetterDelivery.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        DeliveryService service = new DeliveryService(
+            deliveries, events, users, idempotencyKeys, clock, wsPublisher);
+        LetterDelivery received = service.receive(42L, "reception", null, request);
+        assertEquals(DeliveryStatus.RECEIVED, received.getStatus());
+        assertSame(receiver, received.getReceivedBy());
+        assertEquals(LocalDateTime.of(2026, 9, 14, 10, 49), received.getReceivedAt());
+        verify(wsPublisher).notifyDeliveryReceived(received);
+    }
+}

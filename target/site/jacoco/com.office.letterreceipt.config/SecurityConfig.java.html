@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SecurityConfig.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.config</a> &gt; <span class="el_source">SecurityConfig.java</span></div><h1>SecurityConfig.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.config;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
+
+/**
+ * Security configuration for the Letter Receipt System.
+ * 
+ * This configuration is structured to support future SSO/OIDC integration while
+ * maintaining the current username/password authentication.
+ * 
+ * Current authentication methods:
+ * - API endpoints (/api/**): HTTP Basic authentication (stateless)
+ * - Web endpoints (/**): Form-based login with session
+ * 
+ * Future SSO/OIDC integration points (not yet implemented):
+ * - OAuth2/OIDC login for /reception/** endpoints
+ * - JWT token validation for API endpoints
+ * - Identity provider metadata configuration
+ * - User identity mapping from external IdP to application users
+ * 
+ * When the organization's Identity Provider is specified, the following
+ * changes will be needed:
+ * 1. Add spring-boot-starter-oauth2-client dependency
+ * 2. Configure OAuth2 client registration (issuer-uri, client-id, client-secret)
+ * 3. Add OAuth2LoginConfigurer to webSecurity filter chain for /reception/**
+ * 4. Add JwtAuthenticationConverter for API token validation
+ * 5. Implement OAuth2UserService to map external identity to UserAccount
+ * 6. Add optional 'externalId' field to UserAccount for stable IdP subject mapping
+ */
+@Configuration
+<span class="nc" id="L41">public class SecurityConfig {</span>
+
+    @Bean
+    AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+<span class="nc" id="L45">        return config.getAuthenticationManager();</span>
+    }
+
+    @Bean
+    @Order(1)
+    SecurityFilterChain websocketSecurity(HttpSecurity http) throws Exception {
+<span class="nc" id="L51">        http</span>
+<span class="nc" id="L52">            .securityMatcher(&quot;/ws/**&quot;)</span>
+<span class="nc" id="L53">            .authorizeHttpRequests(auth -&gt; auth.anyRequest().permitAll())</span>
+<span class="nc" id="L54">            .csrf(csrf -&gt; csrf.disable());</span>
+<span class="nc" id="L55">        return http.build();</span>
+    }
+
+    @Bean
+    @Order(2)
+    SecurityFilterChain apiSecurity(HttpSecurity http, UserDetailsService userDetailsService) throws Exception {
+<span class="nc" id="L61">        http</span>
+<span class="nc" id="L62">            .securityMatcher(&quot;/api/**&quot;)</span>
+<span class="nc" id="L63">            .userDetailsService(userDetailsService)</span>
+<span class="nc" id="L64">            .authorizeHttpRequests(auth -&gt; auth</span>
+<span class="nc" id="L65">                .requestMatchers(&quot;/api/public/**&quot;).permitAll()</span>
+<span class="nc" id="L66">                .requestMatchers(&quot;/api/admin/login&quot;).permitAll()</span>
+<span class="nc" id="L67">                .requestMatchers(&quot;/api/admin/me&quot;).authenticated()</span>
+<span class="nc" id="L68">                .requestMatchers(&quot;/api/admin/**&quot;).hasRole(&quot;ADMIN&quot;)</span>
+<span class="nc" id="L69">                .requestMatchers(&quot;/api/reception/**&quot;).hasAnyRole(&quot;ADMIN&quot;, &quot;RECEPTIONIST&quot;)</span>
+<span class="nc" id="L70">                .anyRequest().authenticated())</span>
+<span class="nc" id="L71">            .csrf(csrf -&gt; csrf.disable())</span>
+<span class="nc" id="L72">            .sessionManagement(session -&gt; session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))</span>
+<span class="nc" id="L73">            .httpBasic(Customizer.withDefaults());</span>
+            
+            // FUTURE SSO: When OIDC is configured, replace .httpBasic() with:
+            // .oauth2ResourceServer(oauth2 -&gt; oauth2
+            //     .jwt(jwt -&gt; jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())))
+            // And add a JwtAuthenticationConverter bean to map JWT claims to authorities.
+<span class="nc" id="L79">        return http.build();</span>
+    }
+
+    @Bean
+    @Order(3)
+    SecurityFilterChain webSecurity(HttpSecurity http, UserDetailsService userDetailsService) throws Exception {
+<span class="nc" id="L85">        http</span>
+<span class="nc" id="L86">            .userDetailsService(userDetailsService)</span>
+<span class="nc" id="L87">            .authorizeHttpRequests(auth -&gt; auth</span>
+<span class="nc" id="L88">                .requestMatchers(</span>
+                    &quot;/&quot;,
+                    &quot;/deliver&quot;,
+                    &quot;/track&quot;,
+                    &quot;/track/**&quot;,
+                    &quot;/css/**&quot;,
+                    &quot;/js/**&quot;,
+                    &quot;/favicon.svg&quot;,
+                    &quot;/error&quot;,
+                    &quot;/actuator/health&quot;)
+<span class="nc" id="L98">                .permitAll()</span>
+<span class="nc" id="L99">                .requestMatchers(&quot;/admin/**&quot;).hasRole(&quot;ADMIN&quot;)</span>
+<span class="nc" id="L100">                .requestMatchers(&quot;/reception/**&quot;, &quot;/operations/**&quot;).hasAnyRole(&quot;ADMIN&quot;, &quot;RECEPTIONIST&quot;)</span>
+<span class="nc" id="L101">                .anyRequest().authenticated())</span>
+<span class="nc" id="L102">            .csrf(csrf -&gt; csrf</span>
+<span class="nc" id="L103">                .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse()))</span>
+<span class="nc" id="L104">            .formLogin(form -&gt; form</span>
+<span class="nc" id="L105">                .loginPage(&quot;/login&quot;)</span>
+<span class="nc" id="L106">                .defaultSuccessUrl(&quot;/operations&quot;, true)</span>
+<span class="nc" id="L107">                .permitAll())</span>
+<span class="nc" id="L108">            .logout(logout -&gt; logout</span>
+<span class="nc" id="L109">                .logoutSuccessUrl(&quot;/&quot;)</span>
+<span class="nc" id="L110">                .invalidateHttpSession(true)</span>
+<span class="nc" id="L111">                .deleteCookies(&quot;JSESSIONID&quot;, &quot;XSRF-TOKEN&quot;));</span>
+            
+            // FUTURE SSO: When OIDC is configured for Reception, add:
+            // .oauth2Login(oauth2 -&gt; oauth2
+            //     .loginPage(&quot;/reception/login&quot;)
+            //     .authorizationEndpoint(auth -&gt; auth.baseUri(&quot;/oauth2/authorize&quot;))
+            //     .redirectionEndpoint(redir -&gt; redir.baseUri(&quot;/login/oauth2/code/*&quot;))
+            //     .userInfoEndpoint(userInfo -&gt; userInfo.oidcUserService(customOidcUserService()))
+            //     .successHandler(oauth2AuthenticationSuccessHandler()))
+            // And implement CustomOidcUserService and OAuth2AuthenticationSuccessHandler.
+<span class="nc" id="L121">        return http.build();</span>
+    }
+    
+    // FUTURE SSO: Bean for JWT authentication converter when OIDC is enabled
+    /*
+    @Bean
+    JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(jwt -&gt; {
+            // Map JWT claims (e.g., &quot;roles&quot;, &quot;groups&quot;) to Spring Security authorities
+            Collection&lt;GrantedAuthority&gt; authorities = new ArrayList&lt;&gt;();
+            Claim rolesClaim = jwt.getClaim(&quot;roles&quot;);
+            if (rolesClaim != null &amp;&amp; rolesClaim.isArray()) {
+                rolesClaim.asArray(String.class).forEach(role -&gt; 
+                    authorities.add(new SimpleGrantedAuthority(&quot;ROLE_&quot; + role.toUpperCase())));
+            }
+            return authorities;
+        });
+        return converter;
+    }
+    */
+    
+    // FUTURE SSO: Bean for custom OIDC user service when OIDC is enabled
+    /*
+    @Bean
+    OAuth2UserService&lt;OidcUserRequest, OidcUser&gt; customOidcUserService() {
+        return userRequest -&gt; {
+            OidcUser oidcUser = new OidcUserService().loadUser(userRequest);
+            // Map external identity (oidcUser.getSubject()) to UserAccount
+            // Create or update UserAccount with externalId = oidcUser.getSubject()
+            // Return mapped user with application roles
+            return oidcUser;
+        };
+    }
+    */
+    
+    // FUTURE SSO: Bean for OAuth2 authentication success handler when OIDC is enabled
+    /*
+    @Bean
+    AuthenticationSuccessHandler oauth2AuthenticationSuccessHandler() {
+        return (request, response, authentication) -&gt; {
+            // Redirect to reception dashboard after successful SSO login
+            response.sendRedirect(&quot;/reception/dashboard&quot;);
+        };
+    }
+    */
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

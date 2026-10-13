@@ -1,0 +1,208 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DeliveryService.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.service</a> &gt; <span class="el_source">DeliveryService.java</span></div><h1>DeliveryService.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.service;
+
+import com.office.letterreceipt.dto.CreateDeliveryRequest;
+import com.office.letterreceipt.model.DeliveryEvent;
+import com.office.letterreceipt.model.DeliveryEventType;
+import com.office.letterreceipt.model.DeliveryStatus;
+import com.office.letterreceipt.model.IdempotencyKey;
+import com.office.letterreceipt.model.LetterDelivery;
+import com.office.letterreceipt.model.UserAccount;
+import com.office.letterreceipt.repository.LetterDeliveryRepository;
+import com.office.letterreceipt.repository.DeliveryEventRepository;
+import com.office.letterreceipt.repository.IdempotencyKeyRepository;
+import com.office.letterreceipt.repository.UserAccountRepository;
+import com.office.letterreceipt.websocket.WebSocketEventPublisher;
+import jakarta.servlet.http.HttpServletRequest;
+import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.LocalDateTime;
+import java.time.Year;
+import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
+import org.springframework.web.server.ResponseStatusException;
+
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.CONFLICT;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
+
+@Service
+public class DeliveryService {
+<span class="fc" id="L36">    private static final char[] TRACKING_ALPHABET = &quot;ABCDEFGHJKLMNPQRSTUVWXYZ23456789&quot;.toCharArray();</span>
+<span class="fc" id="L37">    private static final SecureRandom RANDOM = new SecureRandom();</span>
+<span class="fc" id="L38">    private static final Logger log = LoggerFactory.getLogger(DeliveryService.class);</span>
+
+    private final LetterDeliveryRepository deliveries;
+    private final DeliveryEventRepository events;
+    private final UserAccountRepository users;
+    private final IdempotencyKeyRepository idempotencyKeys;
+    private final Clock clock;
+    private final WebSocketEventPublisher wsPublisher;
+
+    public DeliveryService(
+            LetterDeliveryRepository deliveries,
+            DeliveryEventRepository events,
+            UserAccountRepository users,
+            IdempotencyKeyRepository idempotencyKeys,
+            Clock clock,
+<span class="fc" id="L53">            WebSocketEventPublisher wsPublisher) {</span>
+<span class="fc" id="L54">        this.deliveries = deliveries;</span>
+<span class="fc" id="L55">        this.events = events;</span>
+<span class="fc" id="L56">        this.users = users;</span>
+<span class="fc" id="L57">        this.idempotencyKeys = idempotencyKeys;</span>
+<span class="fc" id="L58">        this.clock = clock;</span>
+<span class="fc" id="L59">        this.wsPublisher = wsPublisher;</span>
+<span class="fc" id="L60">    }</span>
+
+    @Transactional
+    public LetterDelivery create(CreateDeliveryRequest request, String idempotencyKey, HttpServletRequest servletRequest) {
+<span class="fc" id="L64">        log.info(&quot;SERVICE INPUT: fullName={}, phone={}, email={}, recipient={}, idempotencyKey={}&quot;,</span>
+<span class="fc" id="L65">                request.fullName(), request.phone(), request.email(), request.recipient(), idempotencyKey);</span>
+
+        // Check idempotency key if provided
+<span class="pc bpc" id="L68" title="3 of 4 branches missed.">        if (idempotencyKey != null &amp;&amp; !idempotencyKey.isBlank()) {</span>
+<span class="nc" id="L69">            var existingKey = idempotencyKeys.findByIdempotencyKey(idempotencyKey.trim());</span>
+<span class="nc bnc" id="L70" title="All 2 branches missed.">            if (existingKey.isPresent()) {</span>
+<span class="nc" id="L71">                log.info(&quot;IDEMPOTENCY KEY already used: {}, returning existing delivery with tracking: {}&quot;,</span>
+<span class="nc" id="L72">                        idempotencyKey, existingKey.get().getTrackingNumber());</span>
+<span class="nc" id="L73">                return deliveries.findByTrackingNumberIgnoreCase(existingKey.get().getTrackingNumber())</span>
+<span class="nc" id="L74">                        .orElseThrow(() -&gt; new IllegalStateException(&quot;Idempotency key exists but delivery not found: &quot; + existingKey.get().getTrackingNumber()));</span>
+            }
+        }
+
+<span class="fc" id="L78">        LocalDateTime now = LocalDateTime.now(clock);</span>
+
+<span class="fc" id="L80">        LetterDelivery delivery = new LetterDelivery();</span>
+<span class="fc" id="L81">        delivery.setDeliveryPersonName(request.fullName());</span>
+<span class="fc" id="L82">        delivery.setDeliveryPersonPhone(request.phone());</span>
+<span class="fc" id="L83">        delivery.setDeliveryPersonEmail(request.email());</span>
+<span class="fc" id="L84">        delivery.setRecipientTitle(request.recipient());</span>
+<span class="fc" id="L85">        delivery.setStatus(DeliveryStatus.DELIVERED);</span>
+<span class="fc" id="L86">        delivery.setDeliveredAt(now);</span>
+<span class="fc" id="L87">        delivery.setTrackingNumber(newTrackingNumber());</span>
+<span class="fc" id="L88">        delivery = deliveries.save(delivery);</span>
+<span class="fc" id="L89">        addEvent(delivery, DeliveryEventType.DELIVERED, request.fullName(),</span>
+                &quot;Letter submitted for receipt confirmation&quot;, servletRequest, now);
+<span class="fc" id="L91">        wsPublisher.notifyDeliveryCreated(delivery);</span>
+
+        // Store idempotency key after successful creation
+<span class="pc bpc" id="L94" title="3 of 4 branches missed.">        if (idempotencyKey != null &amp;&amp; !idempotencyKey.isBlank()) {</span>
+<span class="nc" id="L95">            var keyEntity = new IdempotencyKey(</span>
+<span class="nc" id="L96">                    idempotencyKey.trim(),</span>
+<span class="nc" id="L97">                    delivery.getTrackingNumber(),</span>
+                    now,
+<span class="nc" id="L99">                    now.plusHours(24) // 24-hour TTL</span>
+            );
+<span class="nc" id="L101">            idempotencyKeys.save(keyEntity);</span>
+        }
+
+<span class="fc" id="L104">        return delivery;</span>
+    }
+
+    @Transactional
+    public LetterDelivery receive(Long id, String username, String remarks, HttpServletRequest servletRequest) {
+<span class="fc" id="L109">        LetterDelivery delivery = deliveries.findById(id)</span>
+<span class="pc" id="L110">            .orElseThrow(() -&gt; new ResponseStatusException(NOT_FOUND, &quot;Delivery not found.&quot;));</span>
+<span class="pc bpc" id="L111" title="1 of 2 branches missed.">        if (delivery.getStatus() == DeliveryStatus.RECEIVED) {</span>
+<span class="nc" id="L112">            return delivery;</span>
+        }
+<span class="fc" id="L114">        UserAccount receiver = users.findByUsernameIgnoreCase(username)</span>
+<span class="pc" id="L115">            .orElseThrow(() -&gt; new ResponseStatusException(UNAUTHORIZED, &quot;Authenticated user not found.&quot;));</span>
+<span class="fc" id="L116">        LocalDateTime now = LocalDateTime.now(clock);</span>
+<span class="fc" id="L117">        delivery.setStatus(DeliveryStatus.RECEIVED);</span>
+<span class="fc" id="L118">        delivery.setReceivedAt(now);</span>
+<span class="fc" id="L119">        delivery.setReceivedBy(receiver);</span>
+        try {
+<span class="fc" id="L121">            deliveries.save(delivery);</span>
+<span class="nc" id="L122">        } catch (OptimisticLockingFailureException ex) {</span>
+<span class="nc" id="L123">            throw new ResponseStatusException(CONFLICT, &quot;This letter was updated by another user. Refresh and try again.&quot;);</span>
+<span class="fc" id="L124">        }</span>
+<span class="fc" id="L125">        addEvent(delivery, DeliveryEventType.RECEIVED, receiver.getDisplayName(),</span>
+<span class="pc bpc" id="L126" title="1 of 2 branches missed.">            StringUtils.hasText(remarks) ? clean(remarks, 500) : &quot;Physical letter verified and received&quot;,</span>
+            servletRequest, now);
+<span class="fc" id="L128">        wsPublisher.notifyDeliveryReceived(delivery);</span>
+<span class="fc" id="L129">        return delivery;</span>
+    }
+
+    public LetterDelivery findByTracking(String tracking) {
+<span class="nc" id="L133">        return deliveries.findByTrackingNumberIgnoreCase(tracking.trim())</span>
+<span class="nc" id="L134">            .orElseThrow(() -&gt; new ResponseStatusException(NOT_FOUND, &quot;Tracking number not found.&quot;));</span>
+    }
+
+    private void addEvent(
+            LetterDelivery delivery,
+            DeliveryEventType type,
+            String actor,
+            String remarks,
+            HttpServletRequest request,
+            LocalDateTime at) {
+<span class="fc" id="L144">        DeliveryEvent event = new DeliveryEvent();</span>
+<span class="fc" id="L145">        event.setDelivery(delivery);</span>
+<span class="fc" id="L146">        event.setEventType(type);</span>
+<span class="fc" id="L147">        event.setActorName(actor);</span>
+<span class="fc" id="L148">        event.setRemarks(remarks);</span>
+<span class="fc" id="L149">        event.setEventAt(at);</span>
+<span class="pc bpc" id="L150" title="1 of 2 branches missed.">        if (request != null) {</span>
+<span class="fc" id="L151">            event.setIpAddress(clientIp(request));</span>
+<span class="fc" id="L152">            event.setUserAgent(clean(request.getHeader(&quot;User-Agent&quot;), 500));</span>
+        }
+<span class="fc" id="L154">        events.save(event);</span>
+<span class="fc" id="L155">    }</span>
+
+    private String newTrackingNumber() {
+<span class="fc" id="L158">        String year = String.valueOf(Year.now(clock).getValue());</span>
+<span class="pc bpc" id="L159" title="1 of 2 branches missed.">        for (int attempt = 0; attempt &lt; 8; attempt++) {</span>
+<span class="fc" id="L160">            String token = randomTrackingToken(year);</span>
+<span class="pc bpc" id="L161" title="1 of 2 branches missed.">            if (!deliveries.existsByTrackingNumberIgnoreCase(token)) {</span>
+<span class="fc" id="L162">                return token;</span>
+            }
+        }
+<span class="nc" id="L165">        throw new IllegalStateException(&quot;Could not allocate a unique tracking number.&quot;);</span>
+    }
+
+    // Format: REF-2026-7K4P92 (REF-YYYY-XXXXXX = 15 chars)
+    static String randomTrackingToken(String year) {
+<span class="fc" id="L170">        char[] chars = new char[15];</span>
+        // REF- prefix (4 chars)
+<span class="fc" id="L172">        chars[0] = 'R';</span>
+<span class="fc" id="L173">        chars[1] = 'E';</span>
+<span class="fc" id="L174">        chars[2] = 'F';</span>
+<span class="fc" id="L175">        chars[3] = '-';</span>
+        // Year (4 chars)
+<span class="fc" id="L177">        chars[4] = year.charAt(0);</span>
+<span class="fc" id="L178">        chars[5] = year.charAt(1);</span>
+<span class="fc" id="L179">        chars[6] = year.charAt(2);</span>
+<span class="fc" id="L180">        chars[7] = year.charAt(3);</span>
+<span class="fc" id="L181">        chars[8] = '-';</span>
+        // 6 random alphanumeric chars
+<span class="fc bfc" id="L183" title="All 2 branches covered.">        for (int i = 0; i &lt; 6; i++) {</span>
+<span class="fc" id="L184">            chars[9 + i] = TRACKING_ALPHABET[RANDOM.nextInt(TRACKING_ALPHABET.length)];</span>
+        }
+<span class="fc" id="L186">        return new String(chars);</span>
+    }
+
+    private String clientIp(HttpServletRequest request) {
+<span class="fc" id="L190">        String forwarded = request.getHeader(&quot;X-Forwarded-For&quot;);</span>
+<span class="pc bpc" id="L191" title="1 of 2 branches missed.">        if (StringUtils.hasText(forwarded)) {</span>
+<span class="nc" id="L192">            return clean(forwarded.split(&quot;,&quot;)[0].trim(), 64);</span>
+        }
+<span class="fc" id="L194">        return clean(request.getRemoteAddr(), 64);</span>
+    }
+
+    private String clean(String value, int max) {
+<span class="fc bfc" id="L198" title="All 2 branches covered.">        if (value == null) {</span>
+<span class="fc" id="L199">            return null;</span>
+        }
+<span class="fc" id="L201">        String trimmed = value.trim();</span>
+<span class="pc bpc" id="L202" title="1 of 2 branches missed.">        if (trimmed.isEmpty()) {</span>
+<span class="nc" id="L203">            return null;</span>
+        }
+<span class="fc" id="L205">        return trimmed.substring(0, Math.min(max, trimmed.length()));</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

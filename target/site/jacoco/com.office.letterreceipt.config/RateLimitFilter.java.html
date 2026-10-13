@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>RateLimitFilter.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.config</a> &gt; <span class="el_source">RateLimitFilter.java</span></div><h1>RateLimitFilter.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.config;
+
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
+import org.springframework.http.MediaType;
+import org.springframework.stereotype.Component;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+@Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
+public class RateLimitFilter extends OncePerRequestFilter {
+<span class="fc" id="L21">    private final ConcurrentHashMap&lt;String, Window&gt; windows = new ConcurrentHashMap&lt;&gt;();</span>
+    private final boolean enabled;
+    private final int loginPerMinute;
+    private final int publicPostPerMinute;
+
+    public RateLimitFilter(
+            @Value(&quot;${app.rate-limit.enabled:true}&quot;) boolean enabled,
+            @Value(&quot;${app.rate-limit.login-per-minute:8}&quot;) int loginPerMinute,
+<span class="fc" id="L29">            @Value(&quot;${app.rate-limit.public-post-per-minute:40}&quot;) int publicPostPerMinute) {</span>
+<span class="fc" id="L30">        this.enabled = enabled;</span>
+<span class="fc" id="L31">        this.loginPerMinute = loginPerMinute;</span>
+<span class="fc" id="L32">        this.publicPostPerMinute = publicPostPerMinute;</span>
+<span class="fc" id="L33">    }</span>
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+<span class="pc bpc" id="L38" title="3 of 4 branches missed.">        if (!enabled || !&quot;POST&quot;.equalsIgnoreCase(request.getMethod())) {</span>
+<span class="fc" id="L39">            filterChain.doFilter(request, response);</span>
+<span class="fc" id="L40">            return;</span>
+        }
+
+<span class="nc" id="L43">        String path = request.getRequestURI();</span>
+        int limit;
+        String kind;
+<span class="nc bnc" id="L46" title="All 2 branches missed.">        if (&quot;/login&quot;.equals(path)) {</span>
+<span class="nc" id="L47">            limit = loginPerMinute;</span>
+<span class="nc" id="L48">            kind = &quot;login&quot;;</span>
+<span class="nc bnc" id="L49" title="All 2 branches missed.">        } else if (&quot;/api/public/deliveries&quot;.equals(path)) {</span>
+<span class="nc" id="L50">            limit = publicPostPerMinute;</span>
+<span class="nc" id="L51">            kind = &quot;public-post&quot;;</span>
+        } else {
+<span class="nc" id="L53">            filterChain.doFilter(request, response);</span>
+<span class="nc" id="L54">            return;</span>
+        }
+
+<span class="nc" id="L57">        String key = kind + &quot;:&quot; + request.getRemoteAddr();</span>
+<span class="nc" id="L58">        long minute = Instant.now().getEpochSecond() / 60;</span>
+<span class="nc" id="L59">        Window window = windows.compute(key, (ignored, existing) -&gt; {</span>
+<span class="nc bnc" id="L60" title="All 4 branches missed.">            if (existing == null || existing.minute != minute) {</span>
+<span class="nc" id="L61">                return new Window(minute, new AtomicInteger(1));</span>
+            }
+<span class="nc" id="L63">            existing.count.incrementAndGet();</span>
+<span class="nc" id="L64">            return existing;</span>
+        });
+
+<span class="nc bnc" id="L67" title="All 2 branches missed.">        if (window.count.get() &gt; limit) {</span>
+<span class="nc" id="L68">            response.setStatus(429);</span>
+<span class="nc" id="L69">            response.setHeader(&quot;Retry-After&quot;, &quot;60&quot;);</span>
+<span class="nc bnc" id="L70" title="All 2 branches missed.">            if (&quot;login&quot;.equals(kind)) {</span>
+<span class="nc" id="L71">                response.setContentType(MediaType.TEXT_PLAIN_VALUE);</span>
+<span class="nc" id="L72">                response.getWriter().write(&quot;Too many login attempts. Try again in a minute.&quot;);</span>
+            } else {
+<span class="nc" id="L74">                response.setContentType(MediaType.APPLICATION_JSON_VALUE);</span>
+<span class="nc" id="L75">                response.getWriter().write(&quot;{\&quot;message\&quot;:\&quot;Too many delivery submissions. Try again in a minute.\&quot;}&quot;);</span>
+            }
+<span class="nc" id="L77">            return;</span>
+        }
+
+<span class="nc" id="L80">        filterChain.doFilter(request, response);</span>
+<span class="nc" id="L81">    }</span>
+
+<span class="nc" id="L83">    private record Window(long minute, AtomicInteger count) {}</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>DeliveryResponse.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.dto</a> &gt; <span class="el_source">DeliveryResponse.java</span></div><h1>DeliveryResponse.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.dto;
+
+import com.office.letterreceipt.model.LetterDelivery;
+import java.time.LocalDateTime;
+
+<span class="nc" id="L6">public record DeliveryResponse(</span>
+        Long id,
+        String trackingNumber,
+        String status,
+        String deliveryPersonName,
+        String deliveryPersonPhone,
+        String deliveryPersonEmail,
+        String recipientTitle,
+        LocalDateTime deliveredAt,
+        LocalDateTime receivedAt,
+        String receivedBy) {
+
+    public static DeliveryResponse full(LetterDelivery delivery) {
+<span class="nc" id="L19">        return new DeliveryResponse(</span>
+<span class="nc" id="L20">            delivery.getId(),</span>
+<span class="nc" id="L21">            delivery.getTrackingNumber(),</span>
+<span class="nc" id="L22">            delivery.getStatus().name(),</span>
+<span class="nc" id="L23">            delivery.getDeliveryPersonName(),</span>
+<span class="nc" id="L24">            delivery.getDeliveryPersonPhone(),</span>
+<span class="nc" id="L25">            delivery.getDeliveryPersonEmail(),</span>
+<span class="nc" id="L26">            delivery.getRecipientTitle(),</span>
+<span class="nc" id="L27">            delivery.getDeliveredAt(),</span>
+<span class="nc" id="L28">            delivery.getReceivedAt(),</span>
+<span class="nc bnc" id="L29" title="All 2 branches missed.">            delivery.getReceivedBy() == null ? null : delivery.getReceivedBy().getDisplayName());</span>
+    }
+
+    public static DeliveryResponse publicView(LetterDelivery delivery) {
+<span class="nc" id="L33">        return new DeliveryResponse(</span>
+            null,
+<span class="nc" id="L35">            delivery.getTrackingNumber(),</span>
+<span class="nc" id="L36">            delivery.getStatus().name(),</span>
+            null,
+            null,
+            null,
+<span class="nc" id="L40">            delivery.getRecipientTitle(),</span>
+<span class="nc" id="L41">            delivery.getDeliveredAt(),</span>
+<span class="nc" id="L42">            delivery.getReceivedAt(),</span>
+            null);
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

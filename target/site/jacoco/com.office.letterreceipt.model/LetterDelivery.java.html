@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>LetterDelivery.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.model</a> &gt; <span class="el_source">LetterDelivery.java</span></div><h1>LetterDelivery.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.model;
+
+import jakarta.persistence.*;
+import java.time.LocalDateTime;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
+
+@Entity
+@EntityListeners(AuditingEntityListener.class)
+@Table(name = &quot;letter_deliveries&quot;, uniqueConstraints = @UniqueConstraint(name = &quot;uk_delivery_tracking&quot;, columnNames = &quot;tracking_number&quot;), indexes = {
+    @Index(name = &quot;idx_delivery_status_time&quot;, columnList = &quot;status,delivered_at&quot;),
+    @Index(name = &quot;idx_delivery_delivered_at&quot;, columnList = &quot;delivered_at&quot;),
+    @Index(name = &quot;idx_delivery_received_at&quot;, columnList = &quot;received_at&quot;),
+    @Index(name = &quot;idx_delivery_tracking_number&quot;, columnList = &quot;tracking_number&quot;),
+    @Index(name = &quot;idx_delivery_person_name&quot;, columnList = &quot;delivery_person_name&quot;),
+    @Index(name = &quot;idx_delivery_recipient_title&quot;, columnList = &quot;recipient_title&quot;)
+})
+<span class="fc" id="L19">public class LetterDelivery {</span>
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Version
+    private long version;
+
+    // Unified reference/tracking code for the letter (e.g., REF-2026-7K4P92)
+    @Column(name = &quot;tracking_number&quot;, unique = true, nullable = false, length = 40)
+    private String trackingNumber;
+
+    // Delivery person fields (denormalized from mobile payload)
+    @Column(name = &quot;delivery_person_name&quot;, nullable = false, length = 160)
+    private String deliveryPersonName;
+
+    @Column(name = &quot;delivery_person_phone&quot;, length = 60)
+    private String deliveryPersonPhone;
+
+    @Column(name = &quot;delivery_person_email&quot;, length = 180)
+    private String deliveryPersonEmail;
+
+    // Recipient field (from mobile recipient chips)
+    @Column(name = &quot;recipient_title&quot;, length = 160)
+    private String recipientTitle;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private DeliveryStatus status;
+
+    @Column(name = &quot;delivered_at&quot;, nullable = false)
+    private LocalDateTime deliveredAt;
+
+    @Column(name = &quot;received_at&quot;)
+    private LocalDateTime receivedAt;
+
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = &quot;received_by_user_id&quot;)
+    private UserAccount receivedBy;
+
+    @CreatedDate
+    @Column(name = &quot;created_at&quot;, nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    @Column(name = &quot;updated_at&quot;, nullable = false)
+    private LocalDateTime updatedAt;
+
+    // Getters and setters
+<span class="nc" id="L68">    public Long getId() { return id; }</span>
+<span class="fc" id="L69">    public void setId(Long v) { id = v; }</span>
+<span class="nc" id="L70">    public long getVersion() { return version; }</span>
+
+<span class="fc" id="L72">    public String getTrackingNumber() { return trackingNumber; }</span>
+<span class="fc" id="L73">    public void setTrackingNumber(String v) { trackingNumber = v; }</span>
+
+<span class="fc" id="L75">    public String getDeliveryPersonName() { return deliveryPersonName; }</span>
+<span class="fc" id="L76">    public void setDeliveryPersonName(String v) { deliveryPersonName = v; }</span>
+
+<span class="fc" id="L78">    public String getDeliveryPersonPhone() { return deliveryPersonPhone; }</span>
+<span class="fc" id="L79">    public void setDeliveryPersonPhone(String v) { deliveryPersonPhone = v; }</span>
+
+<span class="fc" id="L81">    public String getDeliveryPersonEmail() { return deliveryPersonEmail; }</span>
+<span class="fc" id="L82">    public void setDeliveryPersonEmail(String v) { deliveryPersonEmail = v; }</span>
+
+<span class="fc" id="L84">    public String getRecipientTitle() { return recipientTitle; }</span>
+<span class="fc" id="L85">    public void setRecipientTitle(String v) { recipientTitle = v; }</span>
+
+    // Deprecated - for backward compatibility with existing code
+    @Deprecated
+<span class="fc" id="L89">    public String getRecipientName() { return recipientTitle; }</span>
+    @Deprecated
+<span class="nc" id="L91">    public void setRecipientName(String v) { recipientTitle = v; }</span>
+
+    @Deprecated
+<span class="nc" id="L94">    public String getReceipt() { return recipientTitle; }</span>
+
+<span class="fc" id="L96">    public DeliveryStatus getStatus() { return status; }</span>
+<span class="fc" id="L97">    public void setStatus(DeliveryStatus v) { status = v; }</span>
+
+<span class="fc" id="L99">    public LocalDateTime getDeliveredAt() { return deliveredAt; }</span>
+<span class="fc" id="L100">    public void setDeliveredAt(LocalDateTime v) { deliveredAt = v; }</span>
+
+<span class="fc" id="L102">    public LocalDateTime getReceivedAt() { return receivedAt; }</span>
+<span class="fc" id="L103">    public void setReceivedAt(LocalDateTime v) { receivedAt = v; }</span>
+
+<span class="fc" id="L105">    public UserAccount getReceivedBy() { return receivedBy; }</span>
+<span class="fc" id="L106">    public void setReceivedBy(UserAccount v) { receivedBy = v; }</span>
+
+<span class="nc" id="L108">    public LocalDateTime getCreatedAt() { return createdAt; }</span>
+<span class="nc" id="L109">    public LocalDateTime getUpdatedAt() { return updatedAt; }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

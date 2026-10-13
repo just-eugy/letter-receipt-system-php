@@ -1,0 +1,39 @@
+# Frontend Production Docker Compose
+# Builds and serves the React frontend with nginx
+# Usage: docker compose -f docker-compose.frontend.yml up -d
+
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: letter-delivery-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    networks:
+      - letter-receipt-network
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  api:
+    # Reference to the Laravel backend - deployed separately
+    # This is just for network connectivity in docker-compose
+    external: true
+    name: letter-receipt-php-app
+
+networks:
+  letter-receipt-network:
+    name: letter-receipt-network
+    driver: bridge
+    external: true

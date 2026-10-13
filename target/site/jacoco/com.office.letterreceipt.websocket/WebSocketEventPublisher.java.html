@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>WebSocketEventPublisher.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.websocket</a> &gt; <span class="el_source">WebSocketEventPublisher.java</span></div><h1>WebSocketEventPublisher.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.websocket;
+
+import com.office.letterreceipt.model.LetterDelivery;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class WebSocketEventPublisher {
+    private static final String DELIVERIES_TOPIC = &quot;/topic/deliveries&quot;;
+
+    private final SimpMessagingTemplate messagingTemplate;
+
+<span class="nc" id="L18">    public WebSocketEventPublisher(SimpMessagingTemplate messagingTemplate) {</span>
+<span class="nc" id="L19">        this.messagingTemplate = messagingTemplate;</span>
+<span class="nc" id="L20">    }</span>
+
+    public void notifyDeliveryCreated(LetterDelivery delivery) {
+<span class="nc" id="L23">        Map&lt;String, Object&gt; deliveryData = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L24">        deliveryData.put(&quot;id&quot;, delivery.getId());</span>
+<span class="nc" id="L25">        deliveryData.put(&quot;trackingNumber&quot;, delivery.getTrackingNumber());</span>
+<span class="nc" id="L26">        deliveryData.put(&quot;deliveryPersonName&quot;, delivery.getDeliveryPersonName());</span>
+<span class="nc" id="L27">        deliveryData.put(&quot;deliveryPersonPhone&quot;, delivery.getDeliveryPersonPhone());</span>
+<span class="nc" id="L28">        deliveryData.put(&quot;deliveryPersonEmail&quot;, delivery.getDeliveryPersonEmail());</span>
+<span class="nc" id="L29">        deliveryData.put(&quot;recipientTitle&quot;, delivery.getRecipientTitle());</span>
+<span class="nc" id="L30">        deliveryData.put(&quot;status&quot;, delivery.getStatus().name());</span>
+<span class="nc" id="L31">        deliveryData.put(&quot;deliveredAt&quot;, delivery.getDeliveredAt().toString());</span>
+
+<span class="nc" id="L33">        Map&lt;String, Object&gt; payload = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L34">        payload.put(&quot;type&quot;, &quot;DELIVERY_CREATED&quot;);</span>
+<span class="nc" id="L35">        payload.put(&quot;deliveryId&quot;, delivery.getId());</span>
+<span class="nc" id="L36">        payload.put(&quot;delivery&quot;, deliveryData);</span>
+<span class="nc" id="L37">        payload.put(&quot;message&quot;, &quot;New delivery received&quot;);</span>
+
+<span class="nc" id="L39">        sendAfterCommit(payload);</span>
+<span class="nc" id="L40">    }</span>
+
+    public void notifyDeliveryReceived(LetterDelivery delivery) {
+<span class="nc" id="L43">        Map&lt;String, Object&gt; deliveryData = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L44">        deliveryData.put(&quot;id&quot;, delivery.getId());</span>
+<span class="nc" id="L45">        deliveryData.put(&quot;trackingNumber&quot;, delivery.getTrackingNumber());</span>
+<span class="nc" id="L46">        deliveryData.put(&quot;deliveryPersonName&quot;, delivery.getDeliveryPersonName());</span>
+<span class="nc" id="L47">        deliveryData.put(&quot;deliveryPersonPhone&quot;, delivery.getDeliveryPersonPhone());</span>
+<span class="nc" id="L48">        deliveryData.put(&quot;deliveryPersonEmail&quot;, delivery.getDeliveryPersonEmail());</span>
+<span class="nc" id="L49">        deliveryData.put(&quot;recipientTitle&quot;, delivery.getRecipientTitle());</span>
+<span class="nc" id="L50">        deliveryData.put(&quot;status&quot;, delivery.getStatus().name());</span>
+<span class="nc" id="L51">        deliveryData.put(&quot;deliveredAt&quot;, delivery.getDeliveredAt().toString());</span>
+<span class="nc bnc" id="L52" title="All 2 branches missed.">        deliveryData.put(&quot;receivedAt&quot;, delivery.getReceivedAt() != null ? delivery.getReceivedAt().toString() : null);</span>
+
+<span class="nc" id="L54">        Map&lt;String, Object&gt; payload = new HashMap&lt;&gt;();</span>
+<span class="nc" id="L55">        payload.put(&quot;type&quot;, &quot;DELIVERY_STATUS_CHANGED&quot;);</span>
+<span class="nc" id="L56">        payload.put(&quot;deliveryId&quot;, delivery.getId());</span>
+<span class="nc" id="L57">        payload.put(&quot;status&quot;, delivery.getStatus().name());</span>
+<span class="nc" id="L58">        payload.put(&quot;delivery&quot;, deliveryData);</span>
+
+<span class="nc" id="L60">        sendAfterCommit(payload);</span>
+<span class="nc" id="L61">    }</span>
+
+    // Clients reload from the API when notified, so only announce changes once they are committed.
+    private void sendAfterCommit(Object payload) {
+<span class="nc bnc" id="L65" title="All 2 branches missed.">        if (TransactionSynchronizationManager.isSynchronizationActive()) {</span>
+<span class="nc" id="L66">            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {</span>
+                @Override
+                public void afterCommit() {
+<span class="nc" id="L69">                    messagingTemplate.convertAndSend(DELIVERIES_TOPIC, payload);</span>
+<span class="nc" id="L70">                }</span>
+            });
+        } else {
+<span class="nc" id="L73">            messagingTemplate.convertAndSend(DELIVERIES_TOPIC, payload);</span>
+        }
+<span class="nc" id="L75">    }</span>
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

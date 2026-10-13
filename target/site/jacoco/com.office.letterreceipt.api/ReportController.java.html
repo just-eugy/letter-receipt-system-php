@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="en"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>ReportController.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">Letter Receipt System</a> &gt; <a href="index.source.html" class="el_package">com.office.letterreceipt.api</a> &gt; <span class="el_source">ReportController.java</span></div><h1>ReportController.java</h1><pre class="source lang-java linenums">package com.office.letterreceipt.api;
+
+import com.office.letterreceipt.dto.DeliveryResponse;
+import com.office.letterreceipt.dto.ReportRequest;
+import com.office.letterreceipt.dto.ReportResponse;
+import com.office.letterreceipt.model.DeliveryStatus;
+import com.office.letterreceipt.model.LetterDelivery;
+import com.office.letterreceipt.repository.LetterDeliveryRepository;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping(&quot;/api/reception/reports&quot;)
+public class ReportController {
+
+    private static final int MAX_REPORT_RECORDS = 50000;
+    private final LetterDeliveryRepository deliveries;
+
+<span class="nc" id="L32">    public ReportController(LetterDeliveryRepository deliveries) {</span>
+<span class="nc" id="L33">        this.deliveries = deliveries;</span>
+<span class="nc" id="L34">    }</span>
+
+    @PostMapping(&quot;/generate&quot;)
+    public ReportResponse generateReport(
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo,
+            @RequestParam(required = false) String recipientPosition,
+            @RequestParam(required = false) String status) {
+
+<span class="nc" id="L43">        ReportRequest request = buildRequest(dateFrom, dateTo, recipientPosition, status);</span>
+<span class="nc" id="L44">        LocalDateTime generatedAt = LocalDateTime.now();</span>
+
+        // Build pageable for large result set (up to MAX_REPORT_RECORDS)
+<span class="nc" id="L47">        var pageable = PageRequest.of(0, MAX_REPORT_RECORDS, Sort.by(Sort.Direction.DESC, &quot;deliveredAt&quot;));</span>
+
+<span class="nc" id="L49">        List&lt;LetterDelivery&gt; records = deliveries.findAllForReport(</span>
+<span class="nc" id="L50">                request.status(),</span>
+<span class="nc" id="L51">                request.recipientPosition(),</span>
+<span class="nc" id="L52">                request.dateFrom(),</span>
+<span class="nc" id="L53">                request.dateTo(),</span>
+                pageable);
+<span class="nc" id="L55">        long totalRecords = deliveries.countForReport(</span>
+<span class="nc" id="L56">                request.status(),</span>
+<span class="nc" id="L57">                request.recipientPosition(),</span>
+<span class="nc" id="L58">                request.dateFrom(),</span>
+<span class="nc" id="L59">                request.dateTo());</span>
+
+<span class="nc" id="L61">        List&lt;DeliveryResponse&gt; responseRecords = records.stream()</span>
+<span class="nc" id="L62">                .map(DeliveryResponse::full)</span>
+<span class="nc" id="L63">                .toList();</span>
+
+<span class="nc" id="L65">        return new ReportResponse(responseRecords, totalRecords, request, generatedAt);</span>
+    }
+
+    @GetMapping(&quot;/export/csv&quot;)
+    public void exportCsv(
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo,
+            @RequestParam(required = false) String recipientPosition,
+            @RequestParam(required = false) String status,
+            HttpServletResponse response) throws IOException {
+
+<span class="nc" id="L76">        ReportRequest request = buildRequest(dateFrom, dateTo, recipientPosition, status);</span>
+
+<span class="nc" id="L78">        List&lt;LetterDelivery&gt; records = deliveries.findAllForReport(</span>
+<span class="nc" id="L79">                request.status(),</span>
+<span class="nc" id="L80">                request.recipientPosition(),</span>
+<span class="nc" id="L81">                request.dateFrom(),</span>
+<span class="nc" id="L82">                request.dateTo(),</span>
+<span class="nc" id="L83">                PageRequest.of(0, MAX_REPORT_RECORDS, Sort.by(Sort.Direction.DESC, &quot;deliveredAt&quot;)));</span>
+
+<span class="nc" id="L85">        String filename = &quot;incoming-letter-report-&quot; + LocalDateTime.now().format(DateTimeFormatter.ofPattern(&quot;yyyyMMdd-HHmmss&quot;)) + &quot;.csv&quot;;</span>
+
+<span class="nc" id="L87">        response.setContentType(&quot;text/csv; charset=UTF-8&quot;);</span>
+<span class="nc" id="L88">        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, &quot;attachment; filename=\&quot;&quot; + filename + &quot;\&quot;&quot;);</span>
+
+<span class="nc" id="L90">        try (var writer = new com.opencsv.CSVWriter(response.getWriter())) {</span>
+            // Header - removed Organization, Subject, Reference Number
+<span class="nc" id="L92">            writer.writeNext(new String[]{</span>
+                    &quot;ID&quot;, &quot;Reference&quot;, &quot;Status&quot;, &quot;Delivery Person&quot;,
+                    &quot;Recipient&quot;, &quot;Delivered At&quot;, &quot;Received At&quot;, &quot;Received By&quot;
+            });
+
+            // Data - removed organizationName, subject, referenceNumber
+<span class="nc bnc" id="L98" title="All 2 branches missed.">            for (LetterDelivery d : records) {</span>
+<span class="nc" id="L99">                writer.writeNext(new String[]{</span>
+<span class="nc" id="L100">                        String.valueOf(d.getId()),</span>
+<span class="nc" id="L101">                        d.getTrackingNumber(),</span>
+<span class="nc" id="L102">                        d.getStatus().name(),</span>
+<span class="nc" id="L103">                        d.getDeliveryPersonName(),</span>
+<span class="nc bnc" id="L104" title="All 2 branches missed.">                        d.getRecipientTitle() != null ? d.getRecipientTitle() : &quot;&quot;,</span>
+<span class="nc bnc" id="L105" title="All 2 branches missed.">                        d.getDeliveredAt() != null ? d.getDeliveredAt().toString() : &quot;&quot;,</span>
+<span class="nc bnc" id="L106" title="All 2 branches missed.">                        d.getReceivedAt() != null ? d.getReceivedAt().toString() : &quot;&quot;,</span>
+<span class="nc bnc" id="L107" title="All 2 branches missed.">                        d.getReceivedBy() != null ? d.getReceivedBy().getDisplayName() : &quot;&quot;</span>
+                });
+<span class="nc" id="L109">            }</span>
+        }
+<span class="nc" id="L111">    }</span>
+
+    @GetMapping(&quot;/export/excel&quot;)
+    public void exportExcel(
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo,
+            @RequestParam(required = false) String recipientPosition,
+            @RequestParam(required = false) String status,
+            HttpServletResponse response) throws IOException {
+
+<span class="nc" id="L121">        ReportRequest request = buildRequest(dateFrom, dateTo, recipientPosition, status);</span>
+
+<span class="nc" id="L123">        List&lt;LetterDelivery&gt; records = deliveries.findAllForReport(</span>
+<span class="nc" id="L124">                request.status(),</span>
+<span class="nc" id="L125">                request.recipientPosition(),</span>
+<span class="nc" id="L126">                request.dateFrom(),</span>
+<span class="nc" id="L127">                request.dateTo(),</span>
+<span class="nc" id="L128">                PageRequest.of(0, MAX_REPORT_RECORDS, Sort.by(Sort.Direction.DESC, &quot;deliveredAt&quot;)));</span>
+
+<span class="nc" id="L130">        String filename = &quot;incoming-letter-report-&quot; + LocalDateTime.now().format(DateTimeFormatter.ofPattern(&quot;yyyyMMdd-HHmmss&quot;)) + &quot;.xlsx&quot;;</span>
+
+<span class="nc" id="L132">        response.setContentType(&quot;application/vnd.openxmlformats-officedocument.spreadsheetml.sheet&quot;);</span>
+<span class="nc" id="L133">        response.setHeader(HttpHeaders.CONTENT_DISPOSITION, &quot;attachment; filename=\&quot;&quot; + filename + &quot;\&quot;&quot;);</span>
+
+<span class="nc" id="L135">        try (var workbook = new org.apache.poi.xssf.usermodel.XSSFWorkbook();</span>
+<span class="nc" id="L136">             var os = response.getOutputStream()) {</span>
+
+<span class="nc" id="L138">            var sheet = workbook.createSheet(&quot;Incoming Letters Report&quot;);</span>
+
+            // Header style
+<span class="nc" id="L141">            var headerStyle = workbook.createCellStyle();</span>
+<span class="nc" id="L142">            var headerFont = workbook.createFont();</span>
+<span class="nc" id="L143">            headerFont.setBold(true);</span>
+<span class="nc" id="L144">            headerStyle.setFont(headerFont);</span>
+
+            // Title row
+<span class="nc" id="L147">            var titleRow = sheet.createRow(0);</span>
+<span class="nc" id="L148">            var titleCell = titleRow.createCell(0);</span>
+<span class="nc" id="L149">            titleCell.setCellValue(&quot;INCOMING LETTER REPORT&quot;);</span>
+<span class="nc" id="L150">            titleCell.setCellStyle(headerStyle);</span>
+
+            // Period row
+<span class="nc" id="L153">            var periodRow = sheet.createRow(1);</span>
+<span class="nc" id="L154">            var periodCell = periodRow.createCell(0);</span>
+<span class="nc" id="L155">            String periodStr = buildPeriodString(request);</span>
+<span class="nc" id="L156">            periodCell.setCellValue(&quot;Period: &quot; + periodStr);</span>
+
+            // Generated row
+<span class="nc" id="L159">            var genRow = sheet.createRow(2);</span>
+<span class="nc" id="L160">            var genCell = genRow.createCell(0);</span>
+<span class="nc" id="L161">            genCell.setCellValue(&quot;Generated: &quot; + LocalDateTime.now().format(DateTimeFormatter.ofPattern(&quot;yyyy-MM-dd HH:mm:ss&quot;)));</span>
+
+            // Headers row - removed Organization, Subject, Reference Number
+<span class="nc" id="L164">            var headerRow = sheet.createRow(4);</span>
+<span class="nc" id="L165">            String[] headers = {&quot;ID&quot;, &quot;Reference&quot;, &quot;Status&quot;, &quot;Delivery Person&quot;,</span>
+                    &quot;Recipient&quot;, &quot;Delivered At&quot;, &quot;Received At&quot;, &quot;Received By&quot;};
+<span class="nc bnc" id="L167" title="All 2 branches missed.">            for (int i = 0; i &lt; headers.length; i++) {</span>
+<span class="nc" id="L168">                var cell = headerRow.createCell(i);</span>
+<span class="nc" id="L169">                cell.setCellValue(headers[i]);</span>
+<span class="nc" id="L170">                cell.setCellStyle(headerStyle);</span>
+            }
+
+            // Data rows - removed organizationName, subject, referenceNumber
+<span class="nc" id="L174">            int rowNum = 5;</span>
+<span class="nc bnc" id="L175" title="All 2 branches missed.">            for (LetterDelivery d : records) {</span>
+<span class="nc" id="L176">                var row = sheet.createRow(rowNum++);</span>
+<span class="nc" id="L177">                row.createCell(0).setCellValue(d.getId());</span>
+<span class="nc" id="L178">                row.createCell(1).setCellValue(d.getTrackingNumber());</span>
+<span class="nc" id="L179">                row.createCell(2).setCellValue(d.getStatus().name());</span>
+<span class="nc" id="L180">                row.createCell(3).setCellValue(d.getDeliveryPersonName());</span>
+<span class="nc bnc" id="L181" title="All 2 branches missed.">                row.createCell(4).setCellValue(d.getRecipientTitle() != null ? d.getRecipientTitle() : &quot;&quot;);</span>
+<span class="nc bnc" id="L182" title="All 2 branches missed.">                row.createCell(5).setCellValue(d.getDeliveredAt() != null ? d.getDeliveredAt().toString() : &quot;&quot;);</span>
+<span class="nc bnc" id="L183" title="All 2 branches missed.">                row.createCell(6).setCellValue(d.getReceivedAt() != null ? d.getReceivedAt().toString() : &quot;&quot;);</span>
+<span class="nc bnc" id="L184" title="All 2 branches missed.">                row.createCell(7).setCellValue(d.getReceivedBy() != null ? d.getReceivedBy().getDisplayName() : &quot;&quot;);</span>
+<span class="nc" id="L185">            }</span>
+
+            // Auto-size columns
+<span class="nc bnc" id="L188" title="All 2 branches missed.">            for (int i = 0; i &lt; headers.length; i++) {</span>
+<span class="nc" id="L189">                sheet.autoSizeColumn(i);</span>
+            }
+
+<span class="nc" id="L192">            workbook.write(os);</span>
+        }
+<span class="nc" id="L194">    }</span>
+
+    private com.itextpdf.layout.element.Cell createCell(String text, com.itextpdf.kernel.font.PdfFont font) {
+<span class="nc" id="L197">        return new com.itextpdf.layout.element.Cell()</span>
+<span class="nc bnc" id="L198" title="All 2 branches missed.">                .add(new com.itextpdf.layout.element.Paragraph(text != null ? text : &quot;&quot;).setFont(font).setFontSize(7))</span>
+<span class="nc" id="L199">                .setPadding(3)</span>
+<span class="nc" id="L200">                .setTextAlignment(com.itextpdf.layout.properties.TextAlignment.LEFT);</span>
+    }
+
+    private ReportRequest buildRequest(String dateFrom, String dateTo, String recipientPosition, String status) {
+<span class="nc" id="L204">        LocalDateTime from = parseDate(dateFrom);</span>
+<span class="nc" id="L205">        LocalDateTime to = parseDateToEndOfDay(dateTo);</span>
+<span class="nc" id="L206">        DeliveryStatus deliveryStatus = null;</span>
+<span class="nc bnc" id="L207" title="All 4 branches missed.">        if (status != null &amp;&amp; !status.isBlank()) {</span>
+            try {
+<span class="nc" id="L209">                deliveryStatus = DeliveryStatus.valueOf(status.toUpperCase());</span>
+<span class="nc" id="L210">            } catch (IllegalArgumentException ignored) {</span>
+<span class="nc" id="L211">            }</span>
+        }
+<span class="nc" id="L213">        return new ReportRequest(from, to, blankToNull(recipientPosition), deliveryStatus);</span>
+    }
+
+    private LocalDateTime parseDate(String dateStr) {
+<span class="nc bnc" id="L217" title="All 4 branches missed.">        if (dateStr == null || dateStr.isBlank()) return null;</span>
+        try {
+<span class="nc" id="L219">            return LocalDateTime.parse(dateStr + &quot;T00:00:00&quot;);</span>
+<span class="nc" id="L220">        } catch (Exception e) {</span>
+<span class="nc" id="L221">            return null;</span>
+        }
+    }
+
+    private LocalDateTime parseDateToEndOfDay(String dateStr) {
+<span class="nc bnc" id="L226" title="All 4 branches missed.">        if (dateStr == null || dateStr.isBlank()) return null;</span>
+        try {
+<span class="nc" id="L228">            return LocalDateTime.parse(dateStr + &quot;T23:59:59&quot;);</span>
+<span class="nc" id="L229">        } catch (Exception e) {</span>
+<span class="nc" id="L230">            return null;</span>
+        }
+    }
+
+    private String blankToNull(String s) {
+<span class="nc bnc" id="L235" title="All 4 branches missed.">        return (s == null || s.isBlank()) ? null : s;</span>
+    }
+
+    private String buildPeriodString(ReportRequest request) {
+<span class="nc" id="L239">        DateTimeFormatter fmt = DateTimeFormatter.ofPattern(&quot;MMMM d, yyyy&quot;);</span>
+<span class="nc" id="L240">        StringBuilder sb = new StringBuilder();</span>
+<span class="nc bnc" id="L241" title="All 2 branches missed.">        if (request.dateFrom() != null) {</span>
+<span class="nc" id="L242">            sb.append(request.dateFrom().format(fmt));</span>
+        } else {
+<span class="nc" id="L244">            sb.append(&quot;All time&quot;);</span>
+        }
+<span class="nc" id="L246">        sb.append(&quot; – &quot;);</span>
+<span class="nc bnc" id="L247" title="All 2 branches missed.">        if (request.dateTo() != null) {</span>
+<span class="nc" id="L248">            sb.append(request.dateTo().format(fmt));</span>
+        } else {
+<span class="nc" id="L250">            sb.append(&quot;Present&quot;);</span>
+        }
+<span class="nc bnc" id="L252" title="All 2 branches missed.">        if (request.recipientPosition() != null) {</span>
+<span class="nc" id="L253">            sb.append(&quot; | Recipient: &quot;).append(request.recipientPosition());</span>
+        }
+<span class="nc bnc" id="L255" title="All 2 branches missed.">        if (request.status() != null) {</span>
+<span class="nc" id="L256">            sb.append(&quot; | Status: &quot;).append(request.status().name());</span>
+        }
+<span class="nc" id="L258">        return sb.toString();</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.15.202606040825</span></div></body></html>

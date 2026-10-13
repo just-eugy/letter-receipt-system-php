@@ -1,0 +1,9 @@
+com\office\letterreceipt\SecurityMvcIT.class
+com\office\letterreceipt\support\DockerAvailability.class
+com\office\letterreceipt\service\DeliveryServiceTest.class
+com\office\letterreceipt\DeliveryFlowIT.class
+com\office\letterreceipt\support\MySqlTestContainer.class
+com\office\letterreceipt\dto\CreateDeliveryRequestTest.class
+com\office\letterreceipt\config\AuditingDateTimeProviderTest.class
+com\office\letterreceipt\support\AbstractSpringIT.class
+com\office\letterreceipt\config\BootstrapAdminInitializerTest.class
